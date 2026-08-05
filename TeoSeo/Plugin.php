@@ -57,6 +57,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         // 创建推送日志表
         self::ensureLogTable();
 
+        // 注册后台独立面板「推送历史」
+        \Utils\Helper::addPanel(1, 'TeoSeo/logs.php', 'TeoSeo', '推送历史', 'administrator');
+
         return _t('TeoSeo 已激活: /sitemap.xml 已就绪, 发布文章将自动推送 IndexNow 与百度。');
     }
 
@@ -68,6 +71,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     public static function deactivate()
     {
         \Utils\Helper::removeRoute(self::SITEMAP_ROUTE);
+        \Utils\Helper::removePanel(1, 'TeoSeo/logs.php');
     }
 
     /**
@@ -112,8 +116,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         );
         $form->addInput($sitemapPages);
 
-        /** 推送历史 */
-        self::renderPushHistory();
+        echo '<p style="color:#999; font-size:13px; margin-top:1.5em;">'
+            . _t('推送历史见左侧菜单: <strong>TeoSeo → 推送历史</strong>(最近 50 条推送结果)。')
+            . '</p>';
     }
 
     /**
