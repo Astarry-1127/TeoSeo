@@ -38,6 +38,12 @@
 **Q: sitemap 里没有某篇文章?**
 - sitemap 只包含 `status=publish` 且 `type=post` 的内容,草稿/隐藏文章不会出现
 
+## 相关文章
+
+- [《Typecho1.3SEO插件TeoSeo:自动 sitemap + 发布即推送(IndexNow/百度)》](https://blog.astarry.cn/typecho-seo-plugin/) — 插件开发实录:功能、安装配置、以及给开发者的 Typecho 1.3 插件适配要点(接口变化 / 命名空间 / 面板机制 / 虚拟主机 SSL 坑)
+
+*来自 [Astarry 的技术日记](https://blog.astarry.cn/),记录 Typecho 运维与开源实践。*
+
 ## License
 
 GPL-2.0 — 与 Typecho 一致。欢迎 fork、issue、PR。
