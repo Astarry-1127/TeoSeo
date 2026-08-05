@@ -34,11 +34,15 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     /** sitemap 路由路径 */
     const SITEMAP_PATH = '/sitemap.xml';
 
+    /** 推送日志表名(不含前缀) */
+    const LOG_TABLE = 'seo_logs';
+
     /**
      * 插件激活
      *
      * 1. 注册 /sitemap.xml 路由
      * 2. 挂载「文章发布后」钩子,用于自动推送
+     * 3. 创建推送日志表
      *
      * @return string
      */
@@ -49,6 +53,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
 
         // 文章发布后自动推送搜索引擎
         \Typecho\Plugin::factory('Widget_Contents_Post_Edit')->finishPublish = array(__CLASS__, 'pushOnPublish');
+
+        // 创建推送日志表
+        self::ensureLogTable();
 
         return _t('TeoSeo 已激活: /sitemap.xml 已就绪, 发布文章将自动推送 IndexNow 与百度。');
     }
@@ -104,6 +111,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             '', NULL
         );
         $form->addInput($sitemapPages);
+
+        /** 推送历史 */
+        self::renderPushHistory();
     }
 
     /**
@@ -158,14 +168,18 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
                 $permalink = $siteUrl . '/' . $contents['slug'] . '/';
             }
 
+            $slug = $contents['slug'];
+
             // IndexNow 推送
             if (!empty($config->indexnowKey)) {
-                self::pushIndexNow($siteUrl, $config->indexnowKey, $permalink);
+                list($ok, $detail) = self::pushIndexNow($siteUrl, $config->indexnowKey, $permalink);
+                self::logPush($slug, $permalink, 'IndexNow', $ok, $detail);
             }
 
             // 百度主动推送
             if (!empty($config->baiduToken)) {
-                self::pushBaidu($siteUrl, $config->baiduToken, $permalink);
+                list($ok, $detail) = self::pushBaidu($siteUrl, $config->baiduToken, $permalink);
+                self::logPush($slug, $permalink, '百度', $ok, $detail);
             }
         } catch (Exception $e) {
             error_log('[TeoSeo] pushOnPublish failed: ' . $e->getMessage());
@@ -178,8 +192,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
      * @param string $siteUrl 站点根地址
      * @param string $key IndexNow key
      * @param string $url 待推送 URL
+     * @return array [成功与否, 详情]
      */
-    private static function pushIndexNow(string $siteUrl, string $key, string $url)
+    private static function pushIndexNow(string $siteUrl, string $key, string $url): array
     {
         $host = parse_url($siteUrl, PHP_URL_HOST);
 
@@ -189,8 +204,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             @file_put_contents($keyFile, $key);
         }
         if (!file_exists($keyFile)) {
-            error_log('[TeoSeo] IndexNow key file missing: ' . $keyFile);
-            return;
+            return array(false, 'key 验证文件不存在: ' . $keyFile);
         }
 
         $payload = json_encode(array(
@@ -200,11 +214,13 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             'urlList'     => array($url),
         ));
 
-        self::httpPost(
+        list($code, $resp) = self::httpPost(
             'https://api.indexnow.org/indexnow',
             $payload,
             array('Content-Type: application/json; charset=utf-8')
         );
+
+        return array(200 == $code || 202 == $code, 'HTTP ' . $code . ' ' . substr($resp, 0, 200));
     }
 
     /**
@@ -213,23 +229,29 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
      * @param string $siteUrl 站点根地址
      * @param string $token 百度推送 token
      * @param string $url 待推送 URL
+     * @return array [成功与否, 详情]
      */
-    private static function pushBaidu(string $siteUrl, string $token, string $url)
+    private static function pushBaidu(string $siteUrl, string $token, string $url): array
     {
         $host = parse_url($siteUrl, PHP_URL_HOST);
         $api  = 'https://data.zz.baidu.com/urls?site=' . urlencode($host) . '&token=' . urlencode($token);
 
-        self::httpPost($api, $url . "\n");
+        list($code, $resp) = self::httpPost($api, $url . "\n");
+        $detail = 'HTTP ' . $code . ' ' . substr($resp, 0, 200);
+        $ok = (200 == $code && false !== strpos($resp, '"success"') && false === strpos($resp, '"error"'));
+
+        return array($ok, $detail);
     }
 
     /**
-     * 简单 HTTP POST(curl 优先, 失败静默)
+     * 简单 HTTP POST(curl 优先, 无 curl 时退回流包装器)
      *
      * @param string $url 请求地址
      * @param string $body 请求体
      * @param array $headers 附加请求头
+     * @return array [HTTP 状态码, 响应体]
      */
-    private static function httpPost(string $url, string $body, array $headers = array())
+    private static function httpPost(string $url, string $body, array $headers = array()): array
     {
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
@@ -241,22 +263,123 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
                 CURLOPT_CONNECTTIMEOUT => 10,
                 CURLOPT_TIMEOUT        => 15,
                 CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => 0, // 虚拟主机环境 hostname 校验常失败, 一并关闭
             ));
             $resp = curl_exec($ch);
+            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             if (false === $resp) {
-                error_log('[TeoSeo] POST failed: ' . curl_error($ch) . ' @ ' . $url);
+                $code = 0;
+                $resp = curl_error($ch);
             }
             curl_close($ch);
-        } else {
-            // 无 curl 时退回流包装器
-            @file_get_contents($url, false, stream_context_create(array(
-                'http' => array(
-                    'method'  => 'POST',
-                    'header'  => "Content-Type: application/x-www-form-urlencoded\r\n",
-                    'content' => $body,
-                    'timeout' => 15,
-                ),
-            )));
+            return array($code, (string) $resp);
+        }
+
+        // 无 curl 时退回流包装器
+        $resp = @file_get_contents($url, false, stream_context_create(array(
+            'http' => array(
+                'method'  => 'POST',
+                'header'  => "Content-Type: application/x-www-form-urlencoded\r\n",
+                'content' => $body,
+                'timeout' => 15,
+            ),
+        )));
+        $code = (false === $resp) ? 0 : 200;
+
+        return array($code, (string) $resp);
+    }
+
+    /**
+     * 确保推送日志表存在
+     */
+    private static function ensureLogTable()
+    {
+        try {
+            $db     = \Typecho\Db::get();
+            $prefix = $db->getPrefix();
+            $db->query("CREATE TABLE IF NOT EXISTS `{$prefix}" . self::LOG_TABLE . "` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `created` INT UNSIGNED NOT NULL DEFAULT 0,
+                `slug` VARCHAR(255) NOT NULL DEFAULT '',
+                `url` VARCHAR(500) NOT NULL DEFAULT '',
+                `target` VARCHAR(50) NOT NULL DEFAULT '',
+                `status` VARCHAR(20) NOT NULL DEFAULT '',
+                `detail` VARCHAR(500) NOT NULL DEFAULT '',
+                PRIMARY KEY (`id`),
+                KEY `created` (`created`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        } catch (Exception $e) {
+            error_log('[TeoSeo] ensureLogTable failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 写入推送日志
+     *
+     * @param string $slug 文章 slug
+     * @param string $url 推送 URL
+     * @param string $target 推送目标(IndexNow / 百度)
+     * @param bool $ok 是否成功
+     * @param string $detail 响应详情
+     */
+    private static function logPush(string $slug, string $url, string $target, bool $ok, string $detail)
+    {
+        try {
+            $db     = \Typecho\Db::get();
+            $prefix = $db->getPrefix();
+            $db->query("INSERT INTO `{$prefix}" . self::LOG_TABLE . "`
+                (`created`, `slug`, `url`, `target`, `status`, `detail`)
+                VALUES ('" . time() . "', '" . addslashes($slug) . "', '" . addslashes($url) . "',
+                        '" . addslashes($target) . "', '" . ($ok ? 'success' : 'fail') . "',
+                        '" . addslashes($detail) . "')");
+        } catch (Exception $e) {
+            error_log('[TeoSeo] logPush failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 渲染推送历史表格(设置页展示)
+     */
+    private static function renderPushHistory()
+    {
+        try {
+            $db     = \Typecho\Db::get();
+            $prefix = $db->getPrefix();
+            $rows   = $db->fetchAll($db->query("SELECT * FROM `{$prefix}" . self::LOG_TABLE . "` ORDER BY `id` DESC LIMIT 20"));
+
+            echo '<h2 style="margin-top:2.5em;">推送历史</h2>';
+            if (empty($rows)) {
+                echo '<p style="color:#999;">暂无推送记录, 发布新文章后这里会显示每次推送给搜索引擎的结果。</p>';
+                return;
+            }
+
+            echo '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+            echo '<thead><tr style="background:#f5f5f5; text-align:left;">'
+                . '<th style="padding:8px; border:1px solid #ddd;">时间</th>'
+                . '<th style="padding:8px; border:1px solid #ddd;">文章</th>'
+                . '<th style="padding:8px; border:1px solid #ddd;">目标</th>'
+                . '<th style="padding:8px; border:1px solid #ddd;">状态</th>'
+                . '<th style="padding:8px; border:1px solid #ddd;">详情</th>'
+                . '</tr></thead><tbody>';
+
+            foreach ($rows as $row) {
+                $ok    = ('success' == $row['status']);
+                $color = $ok ? '#16a34a' : '#dc2626';
+                echo '<tr>'
+                    . '<td style="padding:8px; border:1px solid #ddd;">' . date('Y-m-d H:i:s', $row['created']) . '</td>'
+                    . '<td style="padding:8px; border:1px solid #ddd;">' . htmlspecialchars($row['slug']) . '</td>'
+                    . '<td style="padding:8px; border:1px solid #ddd;">' . htmlspecialchars($row['target']) . '</td>'
+                    . '<td style="padding:8px; border:1px solid #ddd; color:' . $color . '; font-weight:bold;">'
+                    . ($ok ? '成功' : '失败') . '</td>'
+                    . '<td style="padding:8px; border:1px solid #ddd; word-break:break-all;">'
+                    . htmlspecialchars($row['detail']) . '</td>'
+                    . '</tr>';
+            }
+
+            echo '</tbody></table>';
+            echo '<p style="color:#999; font-size:12px;">仅显示最近 20 条。日志保留在数据库 ' . $prefix . self::LOG_TABLE . ' 表。</p>';
+        } catch (Exception $e) {
+            echo '<p style="color:#999;">推送历史暂不可用: ' . htmlspecialchars($e->getMessage()) . '</p>';
         }
     }
 }
