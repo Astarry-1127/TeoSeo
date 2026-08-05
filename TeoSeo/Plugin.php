@@ -1,6 +1,16 @@
 <?php
 if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 
+// 兼容层: Typecho 1.3 的插件接口为命名空间版 Typecho\Plugin\PluginInterface,
+// 全局别名 Typecho_Plugin_Interface 未注册, 但后台 parseInfo 依赖
+// `implements Typecho_Plugin_Interface` 识别插件类 —— 这里自行定义空接口,
+// 既满足后台识别, 又保证运行时类加载不报错。
+if (!interface_exists('Typecho_Plugin_Interface', false)) {
+    interface Typecho_Plugin_Interface
+    {
+    }
+}
+
 /**
  * TeoSeo - Typecho SEO 插件
  *
@@ -16,9 +26,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
-// 注: Typecho 1.3 已移除全局接口 Typecho_Plugin_Interface,
-// 插件只需实现 activate/deactivate/config/personalConfig 四个静态方法即可
-class TeoSeo_Plugin
+class TeoSeo_Plugin implements Typecho_Plugin_Interface
 {
     /** sitemap 路由名称 */
     const SITEMAP_ROUTE = 'teoseo_sitemap';
@@ -105,6 +113,7 @@ class TeoSeo_Plugin
      */
     public static function personalConfig(Typecho_Widget_Helper_Form $form)
     {
+        return; // 个人配置暂未使用(保持方法体非空, 便于插件信息解析)
     }
 
     /**
