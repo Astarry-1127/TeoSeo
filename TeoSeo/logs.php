@@ -4,9 +4,39 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 /**
  * TeoSeo 推送历史面板页
  *
- * 后台独立页面, 展示最近 50 条搜索引擎推送记录。
+ * 后台独立页面: 展示最近 50 条推送记录,
+ * 支持手动输入 slug 重新推送(IndexNow + 百度)。
  * 通过 Helper::addPanel 注册, 由 admin/extending.php 加载。
  */
+
+// ===== 处理手动推送 POST =====
+$pushResult = NULL;
+if ('POST' === $_SERVER['REQUEST_METHOD']) {
+    // CSRF 校验(自定义 suffix, 不依赖 referer)
+    if (isset($_POST['_']) && $_POST['_'] === $security->getToken('teoseo-push')) {
+        $slug = trim(isset($_POST['slug']) ? $_POST['slug'] : '');
+        if ('' !== $slug) {
+            try {
+                $db = \Typecho\Db::get();
+                $exists = $db->fetchRow($db->select()->from('table.contents')
+                    ->where('slug = ?', $slug)->limit(1));
+                if ($exists) {
+                    require_once __TYPECHO_ROOT_DIR__ . '/usr/plugins/TeoSeo/Plugin.php';
+                    TeoSeo_Plugin::pushOnPublish(array('slug' => $slug), NULL);
+                    $pushResult = '已推送: ' . $slug . '(IndexNow + 百度), 结果见下方表格最新两条';
+                } else {
+                    $pushResult = 'slug 不存在: ' . $slug;
+                }
+            } catch (\Throwable $e) {
+                $pushResult = '推送失败: ' . $e->getMessage();
+            }
+        } else {
+            $pushResult = '请填写文章 slug';
+        }
+    } else {
+        $pushResult = '校验失败, 请刷新页面重试';
+    }
+}
 
 include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'header.php';
 include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
@@ -24,6 +54,29 @@ include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
         </div>
     </header>
     <div class="flex-1 overflow-y-auto p-6">
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-4">
+            <h2 class="text-base font-semibold mb-3">手动重新推送</h2>
+<?php if (NULL !== $pushResult): ?>
+            <p style="padding:10px 12px; border-radius:6px; margin-bottom:12px;
+                      background:<?php echo (false === strpos($pushResult, '失败') && false === strpos($pushResult, '不存在') && false === strpos($pushResult, '校验') && false === strpos($pushResult, '请填写')) ? '#f0fdf4; color:#166534' : '#fef2f2; color:#b91c1c'; ?>;">
+                <?php echo htmlspecialchars($pushResult); ?>
+            </p>
+<?php endif; ?>
+            <form method="post" action="">
+                <input type="hidden" name="_" value="<?php echo $security->getToken('teoseo-push'); ?>">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <input type="text" name="slug" placeholder="文章 slug, 如 linux-crontab-guide"
+                           style="flex:1; min-width:260px; padding:8px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                    <button type="submit" style="padding:8px 20px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-size:14px; cursor:pointer;">
+                        重新推送
+                    </button>
+                </div>
+                <p style="color:#9ca3af; font-size:12px; margin-top:8px;">
+                    手动触发 IndexNow + 百度推送(用于发布时漏推、或文章更新后想重新通知搜索引擎)。
+                </p>
+            </form>
+        </div>
+
         <div class="bg-white rounded-lg shadow-sm p-6">
 <?php
 try {
