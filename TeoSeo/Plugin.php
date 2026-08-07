@@ -388,17 +388,23 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             }
 
             // meta description: AI 摘要优先, 否则从正文截取
+            // 主题(如 Inaline)可能已经输出过 description/keywords, 再输出一遍会重复,
+            // 所以先看 $header 里有没有, 有就让主题的留下
             $desc = $summary;
             if ('' === $desc) {
+                // 正文是 markdown, 去掉行首 # 和行内 ** / ` 等符号再截取,
+                // 不然 description 里全是 # 和星号, 搜索引擎看到会皱眉
                 $text = trim(strip_tags((string) $archive->text));
+                $text = preg_replace('/^#{1,6}\s*/m', '', $text);
+                $text = preg_replace('/[*_`>~]/', '', $text);
                 $desc = function_exists('mb_substr') ? mb_substr($text, 0, 120) : substr($text, 0, 120);
             }
             $desc = trim(preg_replace('/\s+/', ' ', $desc));
 
-            if ('' !== $desc) {
+            if ('' !== $desc && false === stripos($header, 'name="description"')) {
                 echo '<meta name="description" content="' . htmlspecialchars($desc, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
             }
-            if ('' !== $keywords) {
+            if ('' !== $keywords && false === stripos($header, 'name="keywords"')) {
                 echo '<meta name="keywords" content="' . htmlspecialchars($keywords, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
             }
 
