@@ -67,6 +67,21 @@
 - 确认接口平台账户余额充足、模型名与平台一致
 - 失败信息会写入 PHP 错误日志(`[TeoSeo-AI]` 前缀),也会记入「推送历史」面板(目标: AI摘要)
 
+## 给 Typecho 1.3 插件开发者的避坑清单
+
+开发 TeoSeo 过程中踩过的坑,浓缩成 8 条(详细版见博客):
+
+1. 涉及外部接口的操作:**默认按 30s 执行上限设计**(虚拟主机 `max_execution_time=30s`),能异步就异步
+2. 面板长操作:**优先 AJAX**,别用表单 POST + 302 跳转——`output_buffering` 会把响应憋住,白屏防不胜防
+3. 自定义字段:`typecho_fields.type` 存**字符串类型名**(`'str'`),不是数字 0
+4. 升级脚本:**先清 `options.plugins` 注册表再激活**,且只跑一次(⚠️ 会清空所有插件,仅限单插件场景;多插件请只删对应条目)
+5. 输出到 `<script>` 的 JSON:**必须 `JSON_HEX_TAG`**,AI 生成的不可信内容会闭合标签注入
+6. curl 外部 HTTPS:**默认严格校验**,虚拟主机 CA 残缺时按需降级,别一刀切全关(API Key 会裸奔)
+7. 调 AI 生成:**避开推理模型**(content 常为空),prompt 里的要求要防模型原样抄进输出
+8. `fastcgi_finish_request()` 是虚拟主机异步的好朋友,但要先解决 `output_buffering` 憋响应的问题
+
+完整踩坑实录:[《TeoSeo 插件开发踩坑实录:从白屏到 JSON-LD 注入的八个坑》](https://blog.astarry.cn/teoseo-plugin-pitfalls-guide/)
+
 ## 相关文章
 
 - [《Typecho1.3SEO插件TeoSeo:自动 sitemap + 发布即推送(IndexNow/百度)》](https://blog.astarry.cn/typecho-seo-plugin/) — 插件开发实录:功能、安装配置、以及给开发者的 Typecho 1.3 插件适配要点(接口变化 / 命名空间 / 面板机制 / 虚拟主机 SSL 坑)
