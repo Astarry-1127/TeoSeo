@@ -17,6 +17,10 @@
 
 ## 效果预览
 
+插件设置页:IndexNow / 百度推送 / Sitemap / AI 内容优化(OpenAI 兼容接口)全部集中管理:
+
+![插件设置页](screenshots/teoseo-settings.jpg)
+
 后台「AI 内容优化」面板:一键批量生成存量文章摘要与关键词,未生成与已生成的对比:
 
 ![批量生成前:文章摘要与关键词均未生成](screenshots/teoseo-ai-panel-before.jpg)
