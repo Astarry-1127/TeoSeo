@@ -15,6 +15,18 @@
   - **前台输出** — AI 摘要自动输出为 `meta description` / `meta keywords`,并附带 JSON-LD Article 结构化数据
 - 推送失败静默降级(不影响发布流程),无外部依赖,仅需 PHP curl(无 curl 时自动退回流包装器)
 
+## 效果预览
+
+后台「AI 内容优化」面板:一键批量生成存量文章摘要与关键词,未生成与已生成的对比:
+
+![批量生成前:文章摘要与关键词均未生成](screenshots/teoseo-ai-panel-before.jpg)
+
+![批量生成后:摘要与关键词自动填充,按钮变为更新生成](screenshots/teoseo-ai-panel-after.jpg)
+
+文章页自动输出的 SEO 三件套(meta description / keywords / JSON-LD Article),线上实测抓取:
+
+![文章页 SEO 输出实测](screenshots/seo-output-meta-jsonld.png)
+
 ## 安装
 
 1. 下载并解压,将 `TeoSeo` 目录上传到 `usr/plugins/`
