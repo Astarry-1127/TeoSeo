@@ -137,9 +137,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         $form->addInput($aiEnabled);
 
         $aiBaseUrl = new Typecho_Widget_Helper_Form_Element_Text(
-            'aiBaseUrl', NULL, 'https://api.deepseek.com/v1',
+            'aiBaseUrl', NULL, 'https://open.bigmodel.cn/api/paas/v4',
             _t('AI 接口 BaseURL'),
-            _t('任意 OpenAI 兼容接口, 如 DeepSeek <code>https://api.deepseek.com/v1</code>、通义千问 <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>、智谱 GLM <code>https://open.bigmodel.cn/api/paas/v4</code>。')
+            _t('任意 OpenAI 兼容接口, 如智谱 GLM <code>https://open.bigmodel.cn/api/paas/v4</code>(有免费模型)、DeepSeek <code>https://api.deepseek.com/v1</code>、通义千问 <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>。')
         );
         $form->addInput($aiBaseUrl);
 
@@ -151,9 +151,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         $form->addInput($aiApiKey);
 
         $aiModel = new Typecho_Widget_Helper_Form_Element_Text(
-            'aiModel', NULL, 'deepseek-chat',
+            'aiModel', NULL, 'glm-4-flash-250414',
             _t('模型名'),
-            _t('如 <code>deepseek-chat</code> / <code>qwen-plus</code> / <code>glm-4-flash</code> / <code>gpt-4o-mini</code>。')
+            _t('如 <code>glm-4-flash-250414</code>(智谱免费) / <code>deepseek-chat</code> / <code>qwen-plus</code> / <code>gpt-4o-mini</code>。注意: 推理类模型(如 <code>glm-4.7-flash</code>)把输出耗在思考过程上, content 常为空, 不适用。')
         );
         $form->addInput($aiModel);
 
@@ -310,6 +310,23 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
      * @return array [是否成功, 提示信息]
      */
     public static function applyAiToCid(int $cid, bool $force = false): array
+    {
+        try {
+            return self::applyAiToCidInner($cid, $force);
+        } catch (\Throwable $e) {
+            error_log('[TeoSeo-AI] applyAiToCid failed: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+            return array(false, '生成异常: ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+        }
+    }
+
+    /**
+     * 对单篇文章执行 AI 生成(摘要 + 关键词), 结果写入自定义字段
+     *
+     * @param int $cid 文章 ID
+     * @param bool $force 是否覆盖已有摘要
+     * @return array [是否成功, 提示信息]
+     */
+    private static function applyAiToCidInner(int $cid, bool $force = false): array
     {
         $config = self::readConfig();
         if (NULL === $config) {

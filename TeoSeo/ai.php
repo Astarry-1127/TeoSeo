@@ -68,8 +68,12 @@ if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['generate'])) {
         $cid   = max(0, intval(isset($_POST['cid']) ? $_POST['cid'] : 0));
         $force = isset($_POST['force']);
         if ($cid > 0) {
-            $result = TeoSeo_Plugin::applyAiToCid($cid, $force);
-            $msg    = $result[1];
+            try {
+                $result = TeoSeo_Plugin::applyAiToCid($cid, $force);
+                $msg    = $result[1];
+            } catch (\Throwable $e) {
+                $msg = '生成异常: ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+            }
         } else {
             $msg = '参数错误';
         }
