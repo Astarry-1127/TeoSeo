@@ -23,9 +23,9 @@
 
 ![批量生成后:摘要与关键词自动填充,按钮变为更新生成](screenshots/teoseo-ai-panel-after.jpg)
 
-文章页自动输出的 SEO 三件套(meta description / keywords / JSON-LD Article),线上实测抓取:
+推送历史面板:每次 IndexNow / 百度推送的成败与响应一目了然:
 
-![文章页 SEO 输出实测](screenshots/seo-output-meta-jsonld.png)
+![推送历史面板](screenshots/teoseo-push-history.png)
 
 ## 安装
 
