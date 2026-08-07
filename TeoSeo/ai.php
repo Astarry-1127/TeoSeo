@@ -13,6 +13,9 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 require_once __TYPECHO_ROOT_DIR__ . '/usr/plugins/TeoSeo/Plugin.php';
 require_once __TYPECHO_ROOT_DIR__ . '/usr/plugins/TeoSeo/Client.php';
 
+// 虚拟主机默认 max_execution_time=30s, 批量续跑单篇 AI 就可能超时, 放宽到 150s
+@set_time_limit(150);
+
 $baseRedirect = 'extending.php?panel=TeoSeo%2Fai.php';
 $tokenName    = 'teoseo-ai';
 $msg          = NULL;
@@ -63,24 +66,29 @@ if (isset($_GET['batch']) && '1' === (string) $_GET['batch']) {
 }
 
 // ===== 单篇生成(POST) =====
+// 注意: AI 生成是异步的。之前同步等接口, 虚拟主机 max_execution_time=30s,
+// 接口一慢脚本就被掐死——字段和日志可能已写完, 但跳转永远发不出去, 页面白屏。
+// 现在: 立即跳回面板显示"已提交", 生成挂到请求收尾(shutdown)执行,
+// 页面配 6 秒自动刷新, 结果自动出现。
 if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['generate'])) {
     if (isset($_POST['_']) && $_POST['_'] === $security->getToken($tokenName)) {
         $cid   = max(0, intval(isset($_POST['cid']) ? $_POST['cid'] : 0));
         $force = isset($_POST['force']);
         if ($cid > 0) {
-            try {
-                $result = TeoSeo_Plugin::applyAiToCid($cid, $force);
-                $msg    = $result[1];
-            } catch (\Throwable $e) {
-                $msg = '生成异常: ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
-            }
+            $msg = '生成任务已提交, 约 6 秒后自动刷新查看结果';
+            register_shutdown_function(function () use ($cid, $force) {
+                try {
+                    TeoSeo_Plugin::applyAiToCid($cid, $force);
+                } catch (\Throwable $e) {
+                    error_log('[TeoSeo-AI] 面板异步生成失败: ' . $e->getMessage());
+                }
+            });
         } else {
             $msg = '参数错误';
         }
     } else {
         $msg = '校验失败, 请刷新页面重试';
     }
-    // PRG: 处理完跳回列表页, 避免刷新重复请求浪费 API 额度
     header('Location: ' . $baseRedirect . '&msg=' . rawurlencode($msg));
     exit;
 }
@@ -153,6 +161,9 @@ include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
                       background:<?php echo (false === strpos($msg, '失败') && false === strpos($msg, '关闭') && false === strpos($msg, '未') && false === strpos($msg, '校验') && false === strpos($msg, '中止')) ? '#f0fdf4; color:#166534' : '#fef2f2; color:#b91c1c'; ?>;">
                 <?php echo htmlspecialchars($msg); ?>
             </p>
+<?php if (false !== strpos((string) $msg, '已提交')): ?>
+            <script>setTimeout(function(){ location.reload(); }, 6000);</script>
+<?php endif; ?>
 <?php endif; ?>
         </div>
 
