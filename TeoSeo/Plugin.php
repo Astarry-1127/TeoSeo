@@ -19,10 +19,14 @@ if (!interface_exists('Typecho_Plugin_Interface', false)) {
  * 2. 文章发布时自动向搜索引擎推送收录:
  *    - IndexNow(Bing / Yandex / Seznam / Naver / 360 等)
  *    - 百度站长平台主动推送
+ * 3. AI 内容优化(任意 OpenAI 兼容接口):
+ *    - 发布时自动生成文章摘要与关键词(已有摘要不覆盖)
+ *    - 后台面板批量生成存量文章
+ *    - 前台输出 meta description / keywords / JSON-LD Article
  *
  * @package TeoSeo
  * @author Astarry
- * @version 1.1.0
+ * @version 1.2.0
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
@@ -51,16 +55,20 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         // 注册 sitemap 路由(自动处理路由表重编译)
         \Utils\Helper::addRoute(self::SITEMAP_ROUTE, self::SITEMAP_PATH, 'TeoSeo_Widget', 'render');
 
-        // 文章发布后自动推送搜索引擎
-        \Typecho\Plugin::factory('Widget_Contents_Post_Edit')->finishPublish = array(__CLASS__, 'pushOnPublish');
+        // 文章发布后: 推送搜索引擎 + AI 生成摘要/关键词
+        \Typecho\Plugin::factory('Widget_Contents_Post_Edit')->finishPublish = array(__CLASS__, 'onPublish');
+
+        // 前台输出 SEO meta(description / keywords / JSON-LD)
+        \Typecho\Plugin::factory('Widget_Archive')->header = array(__CLASS__, 'outputHeaderMeta');
 
         // 创建推送日志表
         self::ensureLogTable();
 
-        // 注册后台独立面板「推送历史」
+        // 注册后台独立面板「推送历史」与「AI 内容优化」
         \Utils\Helper::addPanel(1, 'TeoSeo/logs.php', 'TeoSeo', '推送历史', 'administrator');
+        \Utils\Helper::addPanel(2, 'TeoSeo/ai.php', 'TeoSeo', 'AI 内容优化', 'administrator');
 
-        return _t('TeoSeo 已激活: /sitemap.xml 已就绪, 发布文章将自动推送 IndexNow 与百度。');
+        return _t('TeoSeo 已激活: /sitemap.xml 已就绪, 发布文章将自动推送 IndexNow / 百度, 并自动生成 AI 摘要与关键词。');
     }
 
     /**
@@ -72,6 +80,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     {
         \Utils\Helper::removeRoute(self::SITEMAP_ROUTE);
         \Utils\Helper::removePanel(1, 'TeoSeo/logs.php');
+        \Utils\Helper::removePanel(2, 'TeoSeo/ai.php');
     }
 
     /**
@@ -116,8 +125,54 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         );
         $form->addInput($sitemapPages);
 
+        /** AI 内容优化配置 */
+        echo '<h3 style="margin:2em 0 0.8em; border-top:1px dashed #ddd; padding-top:1em;">AI 内容优化</h3>';
+
+        $aiEnabled = new Typecho_Widget_Helper_Form_Element_Checkbox(
+            'aiEnabled', array('enable' => _t('启用 AI 内容优化')),
+            array('enable'),
+            _t('AI 开关'),
+            _t('发布文章时自动生成摘要与关键词(已有摘要的不覆盖); 存量文章可在 <strong>TeoSeo → AI 内容优化</strong> 面板批量生成。')
+        );
+        $form->addInput($aiEnabled);
+
+        $aiBaseUrl = new Typecho_Widget_Helper_Form_Element_Text(
+            'aiBaseUrl', NULL, 'https://api.deepseek.com/v1',
+            _t('AI 接口 BaseURL'),
+            _t('任意 OpenAI 兼容接口, 如 DeepSeek <code>https://api.deepseek.com/v1</code>、通义千问 <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>、智谱 GLM <code>https://open.bigmodel.cn/api/paas/v4</code>。')
+        );
+        $form->addInput($aiBaseUrl);
+
+        $aiApiKey = new Typecho_Widget_Helper_Form_Element_Text(
+            'aiApiKey', NULL, '',
+            _t('API Key'),
+            _t('在对应平台控制台生成, 仅保存在本地数据库中。')
+        );
+        $form->addInput($aiApiKey);
+
+        $aiModel = new Typecho_Widget_Helper_Form_Element_Text(
+            'aiModel', NULL, 'deepseek-chat',
+            _t('模型名'),
+            _t('如 <code>deepseek-chat</code> / <code>qwen-plus</code> / <code>glm-4-flash</code> / <code>gpt-4o-mini</code>。')
+        );
+        $form->addInput($aiModel);
+
+        $aiSummaryLen = new Typecho_Widget_Helper_Form_Element_Text(
+            'aiSummaryLen', NULL, '120',
+            _t('摘要长度(字)'),
+            _t('AI 生成的摘要最大字数, 建议 80~200。')
+        );
+        $form->addInput($aiSummaryLen);
+
+        $aiTimeout = new Typecho_Widget_Helper_Form_Element_Text(
+            'aiTimeout', NULL, '15',
+            _t('请求超时(秒)'),
+            _t('生成失败不影响发布, 请求超过该秒数自动放弃。')
+        );
+        $form->addInput($aiTimeout);
+
         echo '<p style="color:#999; font-size:13px; margin-top:1.5em;">'
-            . _t('推送历史见左侧菜单: <strong>TeoSeo → 推送历史</strong>(最近 50 条推送结果)。')
+            . _t('推送历史见左侧菜单: <strong>TeoSeo → 推送历史</strong>(最近 50 条推送结果); 存量文章 AI 生成见 <strong>TeoSeo → AI 内容优化</strong>。')
             . '</p>';
     }
 
@@ -189,6 +244,272 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         } catch (Exception $e) {
             error_log('[TeoSeo] pushOnPublish failed: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * 发布后统一回调: 推送搜索引擎 + AI 生成摘要/关键词
+     *
+     * @param array $contents 文章数据
+     * @param mixed $widget 发布组件
+     */
+    public static function onPublish(array $contents, $widget)
+    {
+        self::pushOnPublish($contents, $widget);
+        self::aiOnPublish($contents, $widget);
+    }
+
+    /**
+     * 发布后 AI 生成摘要与关键词(失败静默, 不阻塞发布)
+     *
+     * @param array $contents 文章数据
+     * @param mixed $widget 发布组件
+     */
+    public static function aiOnPublish(array $contents, $widget)
+    {
+        try {
+            $cid = isset($contents['cid']) ? intval($contents['cid']) : 0;
+            if (0 === $cid && !empty($contents['slug'])) {
+                // 兜底: 按 slug 反查 cid
+                $row = self::findContentBySlug($contents['slug']);
+                if ($row) {
+                    $cid = intval($row['cid']);
+                }
+            }
+            if (0 === $cid) {
+                return;
+            }
+            self::applyAiToCid($cid, false);
+        } catch (\Throwable $e) {
+            error_log('[TeoSeo-AI] aiOnPublish failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 对单篇文章执行 AI 生成(摘要 + 关键词), 结果写入自定义字段
+     *
+     * @param int $cid 文章 ID
+     * @param bool $force 是否覆盖已有摘要
+     * @return array [是否成功, 提示信息]
+     */
+    public static function applyAiToCid(int $cid, bool $force = false): array
+    {
+        $config = self::readConfig();
+        if (NULL === $config) {
+            return array(false, '插件未配置, 请先到设置页填写 AI 接口');
+        }
+        $enabled = $config->aiEnabled;
+        if (is_array($enabled) && !in_array('enable', $enabled)) {
+            return array(false, 'AI 内容优化已关闭');
+        }
+        if ('' === trim((string) $config->aiBaseUrl) || '' === trim((string) $config->aiApiKey) || '' === trim((string) $config->aiModel)) {
+            return array(false, 'AI 接口未配置完整(BaseURL / API Key / 模型)');
+        }
+
+        $db  = \Typecho\Db::get();
+        $row = $db->fetchRow($db->select()->from('table.contents')
+            ->where('cid = ?', $cid)->limit(1));
+        if (!$row) {
+            return array(false, '文章不存在');
+        }
+
+        $hasSummary = (NULL !== self::getAiField($cid, 'teoseo_ai_summary'));
+        if ($hasSummary && !$force) {
+            return array(false, '该文章已有 AI 摘要, 如需覆盖请用「强制重新生成」');
+        }
+
+        list($summary, $keywords) = TeoSeo_Client::generate($row['title'], $row['text'], $config);
+        if ('' === trim($summary)) {
+            self::logAi($row, false, 'AI 未返回有效摘要(请检查接口配置与余额)');
+            return array(false, 'AI 未返回有效摘要, 请检查接口配置与余额');
+        }
+
+        self::saveAiField($cid, 'teoseo_ai_summary', $summary);
+        self::saveAiField($cid, 'teoseo_ai_keywords', $keywords);
+
+        $len = function_exists('mb_strlen') ? mb_strlen($summary) : strlen($summary);
+        self::logAi($row, true, '摘要 ' . $len . ' 字, 关键词: ' . ('' === $keywords ? '无' : $keywords));
+        return array(true, '已生成摘要(' . $len . ' 字)' . ('' === $keywords ? '' : ', 关键词: ' . $keywords));
+    }
+
+    /**
+     * 前台输出 SEO meta: meta description / keywords / JSON-LD Article
+     *
+     * 由主题调用 $this->header() 触发, Widget\Archive::header() 会把
+     * 已生成的 header 字符串与当前 archive 实例传给回调。
+     *
+     * @param string $header 已生成的头部元数据
+     * @param mixed $archive 当前 Widget\Archive 实例
+     */
+    public static function outputHeaderMeta(string $header, $archive)
+    {
+        try {
+            if (!($archive instanceof \Widget\Archive)) {
+                return;
+            }
+            if (!$archive->is('post') && !$archive->is('page')) {
+                return;
+            }
+
+            // 直接读字段表, 不依赖 fields 对象(兼容性最好)
+            $summary  = '';
+            $keywords = '';
+            try {
+                $db  = \Typecho\Db::get();
+                $fds = $db->fetchAll($db->select('name', 'str_value')->from('table.fields')
+                    ->where('cid = ?', $archive->cid));
+                foreach ($fds as $f) {
+                    if ('teoseo_ai_summary' === $f['name']) {
+                        $summary = trim((string) $f['str_value']);
+                    } elseif ('teoseo_ai_keywords' === $f['name']) {
+                        $keywords = trim((string) $f['str_value']);
+                    }
+                }
+            } catch (\Throwable $e) {
+                // 字段读取失败时忽略
+            }
+
+            // meta description: AI 摘要优先, 否则从正文截取
+            $desc = $summary;
+            if ('' === $desc) {
+                $text = trim(strip_tags((string) $archive->text));
+                $desc = function_exists('mb_substr') ? mb_substr($text, 0, 120) : substr($text, 0, 120);
+            }
+            $desc = trim(preg_replace('/\s+/', ' ', $desc));
+
+            if ('' !== $desc) {
+                echo '<meta name="description" content="' . htmlspecialchars($desc, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+            }
+            if ('' !== $keywords) {
+                echo '<meta name="keywords" content="' . htmlspecialchars($keywords, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+            }
+
+            // JSON-LD Article 结构化数据
+            $options = \Utils\Helper::options();
+            $siteTitle = trim((string) $options->title);
+
+            $author = $siteTitle;
+            try {
+                if (isset($archive->author->name) && '' !== trim((string) $archive->author->name)) {
+                    $author = trim((string) $archive->author->name);
+                }
+            } catch (\Throwable $e) {
+            }
+
+            $jsonLd = array(
+                '@context'         => 'https://schema.org',
+                '@type'            => 'Article',
+                'headline'         => trim((string) $archive->title),
+                'datePublished'    => date('c', $archive->created),
+                'dateModified'     => date('c', $archive->modified),
+                'mainEntityOfPage' => (string) $archive->permalink,
+                'author'           => array('@type' => 'Person', 'name' => $author),
+                'publisher'        => array('@type' => 'Organization', 'name' => $siteTitle),
+            );
+            if ('' !== $desc) {
+                $jsonLd['description'] = $desc;
+            }
+            if ('' !== $keywords) {
+                $jsonLd['keywords'] = $keywords;
+            }
+            echo '<script type="application/ld+json">'
+                . json_encode($jsonLd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                . '</script>' . "\n";
+        } catch (\Throwable $e) {
+            error_log('[TeoSeo-AI] outputHeaderMeta failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 读取插件配置(未配置时返回 NULL, 避免 500)
+     */
+    private static function readConfig()
+    {
+        try {
+            return \Utils\Helper::options()->plugin('TeoSeo');
+        } catch (\Throwable $e) {
+            return NULL;
+        }
+    }
+
+    /**
+     * 读取文章自定义字段值
+     *
+     * @param int $cid 文章 ID
+     * @param string $name 字段名
+     * @return string|null 不存在时返回 NULL
+     */
+    private static function getAiField(int $cid, string $name)
+    {
+        try {
+            $db  = \Typecho\Db::get();
+            $row = $db->fetchRow($db->select('str_value')->from('table.fields')
+                ->where('cid = ? AND name = ?', $cid, $name)->limit(1));
+            return $row ? $row['str_value'] : NULL;
+        } catch (\Throwable $e) {
+            return NULL;
+        }
+    }
+
+    /**
+     * 写入(或更新)文章自定义字段
+     *
+     * @param int $cid 文章 ID
+     * @param string $name 字段名
+     * @param string $value 字段值
+     */
+    private static function saveAiField(int $cid, string $name, string $value)
+    {
+        $db  = \Typecho\Db::get();
+        $row = $db->fetchRow($db->select('cid')->from('table.fields')
+            ->where('cid = ? AND name = ?', $cid, $name)->limit(1));
+        if ($row) {
+            $db->query($db->update('table.fields')->rows(array('str_value' => $value))
+                ->where('cid = ? AND name = ?', $cid, $name));
+        } else {
+            $db->query($db->insert('table.fields')->rows(array(
+                'cid'         => $cid,
+                'name'        => $name,
+                'type'        => 0,
+                'str_value'   => $value,
+                'int_value'   => 0,
+                'float_value' => 0,
+            )));
+        }
+    }
+
+    /**
+     * 记录 AI 生成日志(复用推送日志表, target 为 AI摘要)
+     *
+     * @param array $row 文章数据(cid / slug)
+     * @param bool $ok 是否成功
+     * @param string $detail 详情
+     */
+    private static function logAi(array $row, bool $ok, string $detail)
+    {
+        try {
+            $options = \Utils\Helper::options();
+            $siteUrl = rtrim($options->siteUrl, '/');
+            $url = Typecho\Router::url('post', array('slug' => $row['slug']), $siteUrl);
+            if (empty($url) || '#' == $url) {
+                $url = $siteUrl . '/' . $row['slug'] . '/';
+            }
+            self::logPush($row['slug'], $url, 'AI摘要', $ok, $detail);
+        } catch (\Throwable $e) {
+            error_log('[TeoSeo-AI] logAi failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 按 slug 查找文章(兜底用)
+     *
+     * @param string $slug 文章缩略名
+     * @return array|null
+     */
+    private static function findContentBySlug(string $slug)
+    {
+        $db = \Typecho\Db::get();
+        return $db->fetchRow($db->select()->from('table.contents')
+            ->where('slug = ?', $slug)->limit(1));
     }
 
     /**

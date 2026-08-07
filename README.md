@@ -9,6 +9,10 @@
   - **IndexNow** — 一次提交,Bing / Yandex / Seznam / Naver / 360 等多平台生效
   - **百度主动推送** — 百度搜索资源平台普通收录
 - **手动重新推送**(v1.1.0):后台推送历史面板输入 slug 即可随时补推(发布漏推或文章更新后重新通知搜索引擎)
+- **AI 内容优化**(v1.2.0,任意 OpenAI 兼容接口):
+  - **发布即生成** — 文章发布时自动调用 AI 生成摘要与关键词,已有摘要不覆盖,失败静默不影响发布
+  - **批量生成** — 后台「TeoSeo → AI 内容优化」面板一键处理存量文章,逐篇续跑防超时,失败自动中止防死循环
+  - **前台输出** — AI 摘要自动输出为 `meta description` / `meta keywords`,并附带 JSON-LD Article 结构化数据
 - 推送失败静默降级(不影响发布流程),无外部依赖,仅需 PHP curl(无 curl 时自动退回流包装器)
 
 ## 安装
@@ -18,11 +22,14 @@
 3. 插件设置中填写:
    - **IndexNow API Key**:在 [Bing Webmaster](https://www.bing.com/webmasters/indexnow) 生成(32 位字符串)。需保证站点根目录存在 `{key}.txt` 验证文件(内容为 key 本身),插件会在推送时自动尝试写入
    - **百度推送 Token**:百度搜索资源平台 → 普通收录 → 主动推送 中获取
+   - **AI 接口**(可选,不填则跳过 AI 功能):任意 OpenAI 兼容接口,填写 BaseURL / API Key / 模型名。例如 DeepSeek(`https://api.deepseek.com/v1` + `deepseek-chat`)、通义千问、智谱 GLM 等
 
 ## 使用
 
 - sitemap:访问 `https://你的域名/sitemap.xml`,并在 [robots.txt](https://zhuanlan.zhihu.com/p/341513115) 中加入 `Sitemap: https://你的域名/sitemap.xml`
 - 推送:正常发布文章即可,无需任何手动操作
+- AI 摘要/关键词:发布新文章自动生成;存量文章在后台 **TeoSeo → AI 内容优化** 面板点「批量生成」逐篇处理(每篇一次接口调用,保持页面打开即可,自动跳转直到完成)
+- 生成记录:AI 生成结果与推送记录一同写入「推送历史」面板(目标: AI摘要)
 
 ## 兼容性
 
@@ -38,6 +45,11 @@
 
 **Q: sitemap 里没有某篇文章?**
 - sitemap 只包含 `status=publish` 且 `type=post` 的内容,草稿/隐藏文章不会出现
+
+**Q: AI 摘要生成失败?**
+- 检查设置页 AI 接口 BaseURL / API Key / 模型名是否填写正确
+- 确认接口平台账户余额充足、模型名与平台一致
+- 失败信息会写入 PHP 错误日志(`[TeoSeo-AI]` 前缀),也会记入「推送历史」面板(目标: AI摘要)
 
 ## 相关文章
 
