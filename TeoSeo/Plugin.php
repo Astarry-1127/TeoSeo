@@ -165,11 +165,19 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         $form->addInput($aiSummaryLen);
 
         $aiTimeout = new Typecho_Widget_Helper_Form_Element_Text(
-            'aiTimeout', NULL, '15',
+            'aiTimeout', NULL, '30',
             _t('请求超时(秒)'),
-            _t('生成失败不影响发布, 请求超过该秒数自动放弃。')
+            _t('生成失败不影响发布, 请求超过该秒数自动放弃。长文接口一般要 20~40 秒, 默认 30 比较稳。')
         );
         $form->addInput($aiTimeout);
+
+        $aiSkipVerifySSL = new Typecho_Widget_Helper_Form_Element_Checkbox(
+            'aiSkipVerifySSL', array('skip' => _t('允许跳过 SSL 校验')),
+            NULL,
+            _t('SSL 校验'),
+            _t('默认严格校验, 若虚拟主机 CA 链残缺导致请求失败, 勾选后会自动降级重试一次。')
+        );
+        $form->addInput($aiSkipVerifySSL);
 
         echo '<p style="color:#999; font-size:13px; margin-top:1.5em;">'
             . _t('推送历史见左侧菜单: <strong>TeoSeo → 推送历史</strong>(最近 50 条推送结果); 存量文章 AI 生成见 <strong>TeoSeo → AI 内容优化</strong>。')
@@ -259,7 +267,11 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     }
 
     /**
-     * 发布后 AI 生成摘要与关键词(失败静默, 不阻塞发布)
+     * 发布后 AI 生成摘要与关键词。
+     *
+     * 走 register_shutdown_function 挂到请求末尾执行——AI 接口慢的话(几十秒)
+     * 不能让发文章的人干等, 响应先回去, 生成结果写完字段下次刷新就能看到。
+     * 失败静默记日志, 不影响发布本身。
      *
      * @param array $contents 文章数据
      * @param mixed $widget 发布组件
@@ -269,7 +281,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         try {
             $cid = isset($contents['cid']) ? intval($contents['cid']) : 0;
             if (0 === $cid && !empty($contents['slug'])) {
-                // 兜底: 按 slug 反查 cid
+                // 兜底: 某些入口只给 slug, 反查一下 cid
                 $row = self::findContentBySlug($contents['slug']);
                 if ($row) {
                     $cid = intval($row['cid']);
@@ -278,7 +290,13 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             if (0 === $cid) {
                 return;
             }
-            self::applyAiToCid($cid, false);
+            register_shutdown_function(function () use ($cid) {
+                try {
+                    self::applyAiToCid($cid, false);
+                } catch (\Throwable $e) {
+                    error_log('[TeoSeo-AI] shutdown 阶段生成失败: ' . $e->getMessage());
+                }
+            });
         } catch (\Throwable $e) {
             error_log('[TeoSeo-AI] aiOnPublish failed: ' . $e->getMessage());
         }
@@ -302,6 +320,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             return array(false, 'AI 内容优化已关闭');
         }
         if ('' === trim((string) $config->aiBaseUrl) || '' === trim((string) $config->aiApiKey) || '' === trim((string) $config->aiModel)) {
+            // 三个缺一个都不行, 免得调了半天接口报 401 才想起来 key 没填
             return array(false, 'AI 接口未配置完整(BaseURL / API Key / 模型)');
         }
 
@@ -383,7 +402,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
                 echo '<meta name="keywords" content="' . htmlspecialchars($keywords, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
             }
 
-            // JSON-LD Article 结构化数据
+            // JSON-LD Article 结构化数据(给 Google/Bing 吃的那份)
             $options = \Utils\Helper::options();
             $siteTitle = trim((string) $options->title);
 
@@ -411,8 +430,10 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             if ('' !== $keywords) {
                 $jsonLd['keywords'] = $keywords;
             }
+            // JSON_HEX_TAG/AMP: 防止标题或 AI 摘要里混进 </script> 之类的内容提前
+            // 闭合 script 标签变成注入点, 这个坑之前真踩过
             echo '<script type="application/ld+json">'
-                . json_encode($jsonLd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                . json_encode($jsonLd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)
                 . '</script>' . "\n";
         } catch (\Throwable $e) {
             error_log('[TeoSeo-AI] outputHeaderMeta failed: ' . $e->getMessage());

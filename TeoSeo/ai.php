@@ -18,6 +18,8 @@ $tokenName    = 'teoseo-ai';
 $msg          = NULL;
 
 // ===== 批量生成(GET, 每次处理一篇后 302 续跑, 直到没有待生成文章) =====
+// 为啥不用循环一把梭? 虚拟主机 PHP 有 max_execution_time, 几十篇一起跑必超时,
+// 一篇一跳转是最土也最稳的办法, 还顺便能看进度。
 if (isset($_GET['batch']) && '1' === (string) $_GET['batch']) {
     if (!isset($_GET['_']) || $_GET['_'] !== $security->getToken($tokenName)) {
         $msg = '校验失败, 请刷新页面重试';

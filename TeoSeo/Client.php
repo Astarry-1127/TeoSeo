@@ -4,8 +4,8 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 /**
  * TeoSeo AI 内容优化客户端
  *
- * 调用任意 OpenAI 兼容接口(DeepSeek / 通义千问 / 智谱 GLM / Kimi / OpenAI 等),
- * 为文章生成摘要与关键词。统一走 /chat/completions 协议。
+ * 统一走 OpenAI 兼容的 /chat/completions 协议, 所以 DeepSeek / 通义 / 智谱 / Kimi
+ * 这些家的接口都能用, 换平台只改 BaseURL 和模型名就行, 不用改代码。
  *
  * @package TeoSeo
  */
@@ -15,9 +15,9 @@ class TeoSeo_Client
      * 生成摘要 + 关键词
      *
      * @param string $title 文章标题
-     * @param string $content 文章正文(markdown)
+     * @param string $content 文章正文
      * @param object $config 插件配置
-     * @return array [摘要, 关键词字符串(英文逗号分隔), 可能为空字符串]
+     * @return array [摘要, 关键词字符串(英文逗号分隔), 拿不到时都是空串]
      */
     public static function generate(string $title, string $content, $config): array
     {
@@ -25,12 +25,14 @@ class TeoSeo_Client
         $apiKey  = trim((string) $config->aiApiKey);
         $model   = trim((string) $config->aiModel);
         if ('' === $baseUrl || '' === $apiKey || '' === $model) {
+            // 配置没填全就啥也别干, 免得后台报一堆错
             return array('', '');
         }
 
         $summaryLen = max(30, min(500, intval($config->aiSummaryLen ?: 120)));
-        $timeout    = max(5, min(120, intval($config->aiTimeout ?: 15)));
+        $timeout    = max(5, min(120, intval($config->aiTimeout ?: 30)));
 
+        // 长文丢进 token 太贵, 正文截 6000 字够 AI 理解大意了
         $content = self::truncate($content, 6000);
 
         $prompt = '你是一名专业的博客 SEO 助手。请阅读下面这篇文章的标题与正文，只输出一个 JSON 对象，不要输出任何其他文字。'
@@ -53,7 +55,8 @@ class TeoSeo_Client
             $baseUrl . '/chat/completions',
             $payload,
             'Bearer ' . $apiKey,
-            $timeout
+            $timeout,
+            !empty($config->aiSkipVerifySSL)
         );
 
         if (200 != $code) {
@@ -72,7 +75,9 @@ class TeoSeo_Client
     }
 
     /**
-     * 解析模型输出(尽力提取 summary / keywords, 解析失败时整段当作摘要)
+     * 解析模型输出。
+     * 有的模型会把 JSON 包在 ``` 代码块里, 有的会啰嗦两句再给 JSON,
+     * 这里尽量宽容: 剥掉代码块标记后能解出 JSON 就用, 解不出就把整段当摘要。
      *
      * @param string $text 模型输出
      * @param int $summaryLen 摘要最大字数
@@ -89,11 +94,12 @@ class TeoSeo_Client
             return array($summary, $keywords);
         }
 
+        // 模型不听话直接返回了散文, 截一段当摘要用, 关键词就留空了
         return array(self::truncate($text, $summaryLen), '');
     }
 
     /**
-     * 截断字符串(按字符, 控制 token 消耗)
+     * 截断字符串(按字符数, 主要是控制 token 消耗)
      *
      * @param string $text 原文本
      * @param int $max 最大字符数
@@ -111,13 +117,18 @@ class TeoSeo_Client
     /**
      * JSON POST(OpenAI 兼容 /chat/completions)
      *
+     * SSL 校验默认开着——key 是钱, 不能裸奔。但西部数码这类虚拟主机 CA 链经常
+     * 残缺, 校验会失败, 所以勾了「跳过 SSL 校验」时: 先按严格模式试一次,
+     * 失败再降级重试, 这样两边都不耽误。
+     *
      * @param string $url 请求地址
      * @param string $payload JSON 请求体
      * @param string $apiKey Authorization 头
      * @param int $timeout 超时秒数
+     * @param bool $skipSsl 允许降级跳过 SSL 校验
      * @return array [HTTP 状态码, 响应体]
      */
-    private static function httpPostJson(string $url, string $payload, string $apiKey, int $timeout): array
+    private static function httpPostJson(string $url, string $payload, string $apiKey, int $timeout, bool $skipSsl): array
     {
         $headers = array(
             'Content-Type: application/json; charset=utf-8',
@@ -133,11 +144,18 @@ class TeoSeo_Client
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_CONNECTTIMEOUT => 10,
                 CURLOPT_TIMEOUT        => $timeout,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_SSL_VERIFYHOST => 0, // 虚拟主机环境 hostname 校验常失败, 一并关闭
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
             ));
             $resp = curl_exec($ch);
             $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if (false === $resp && $skipSsl) {
+                // 严格模式连不上, 多半是宿主机的 CA 问题, 降级再试一次
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+                $resp = curl_exec($ch);
+                $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            }
             if (false === $resp) {
                 $code = 0;
                 $resp = curl_error($ch);
@@ -146,7 +164,7 @@ class TeoSeo_Client
             return array($code, (string) $resp);
         }
 
-        // 无 curl 时退回流包装器
+        // 没 curl 的环境(极少见)退回流包装器
         $resp = @file_get_contents($url, false, stream_context_create(array(
             'http' => array(
                 'method'  => 'POST',
