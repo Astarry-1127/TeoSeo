@@ -90,6 +90,18 @@ if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['generate'])) {
         $msg = '校验失败, 请刷新页面重试';
     }
     header('Location: ' . $baseRedirect . '&msg=' . rawurlencode($msg));
+    // 关键一步: 立刻把 302 发出去再跑 AI。
+    // 虚拟主机 output_buffering=4096, 不主动 flush 的话响应会被憋在缓冲区,
+    // exit 后先跑 shutdown(AI 最长 30s)再发 → 浏览器白屏干等。
+    // fastcgi_finish_request 同时释放 FPM worker, 跳转后的面板页不用排队。
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    } else {
+        while (ob_get_level() > 0) {
+            ob_end_flush();
+        }
+        flush();
+    }
     exit;
 }
 
