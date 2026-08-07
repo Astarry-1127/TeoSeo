@@ -5,104 +5,61 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  * TeoSeo AI 内容优化面板页
  *
  * 1. 单篇生成 / 强制重新生成(覆盖已有摘要)
- * 2. 一键批量生成存量文章: 每请求处理一篇后自动跳转续跑, 避免超时,
- *    若某篇连续失败会停止, 防止无限循环。
+ * 2. 一键批量生成存量文章
+ * 3. 生成全部走 AJAX(fetch), 页面不跳转不白屏: 点击后按钮变"生成中…",
+ *    接口在后台跑(最长 aiTimeout), 完成后页面原地更新。
  * 通过 Helper::addPanel 注册, 由 admin/extending.php 加载。
  */
 
 require_once __TYPECHO_ROOT_DIR__ . '/usr/plugins/TeoSeo/Plugin.php';
 require_once __TYPECHO_ROOT_DIR__ . '/usr/plugins/TeoSeo/Client.php';
 
-// 虚拟主机默认 max_execution_time=30s, 批量续跑单篇 AI 就可能超时, 放宽到 150s
+// 虚拟主机默认 max_execution_time=30s, AI 接口慢的时候不够用, 单请求放宽
 @set_time_limit(150);
 
-$baseRedirect = 'extending.php?panel=TeoSeo%2Fai.php';
-$tokenName    = 'teoseo-ai';
-$msg          = NULL;
+$tokenName = 'teoseo-ai';
+$msg       = NULL;
 
-// ===== 批量生成(GET, 每次处理一篇后 302 续跑, 直到没有待生成文章) =====
-// 为啥不用循环一把梭? 虚拟主机 PHP 有 max_execution_time, 几十篇一起跑必超时,
-// 一篇一跳转是最土也最稳的办法, 还顺便能看进度。
-if (isset($_GET['batch']) && '1' === (string) $_GET['batch']) {
-    if (!isset($_GET['_']) || $_GET['_'] !== $security->getToken($tokenName)) {
-        $msg = '校验失败, 请刷新页面重试';
-    } else {
-        $done = max(0, intval(isset($_GET['done']) ? $_GET['done'] : 0));
-        $last = max(0, intval(isset($_GET['last']) ? $_GET['last'] : 0));
+// ===== AJAX 生成入口(单篇 / 批量共用, 返回 JSON) =====
+// 放最前面: 批量参数 batch=1 以前是 302 续跑, 现在批量逻辑整体搬到 JS 循环里
+if (isset($_GET['ajax']) && '1' === (string) $_GET['ajax']) {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        if (!isset($_GET['_']) || $_GET['_'] !== $security->getToken($tokenName)) {
+            echo json_encode(array('ok' => false, 'msg' => '校验失败, 请刷新页面重试'));
+            exit;
+        }
 
-        if ($done >= 200) {
-            $msg = '已达本次批量上限(200 篇), 如需继续请再次点击批量生成';
-        } else {
-            try {
-                $db     = \Typecho\Db::get();
-                $prefix = $db->getPrefix();
-                $row = $db->fetchRow($db->query(
-                    "SELECT c.cid, c.slug FROM `{$prefix}contents` c
-                     LEFT JOIN `{$prefix}fields` f ON f.cid = c.cid AND f.name = 'teoseo_ai_summary'
-                     WHERE c.type = 'post' AND c.status = 'publish' AND f.cid IS NULL
-                     ORDER BY c.cid ASC LIMIT 1"
-                ));
+        $db     = \Typecho\Db::get();
+        $prefix = $db->getPrefix();
 
-                if ($row) {
-                    $cid = intval($row['cid']);
-                    if ($cid === $last) {
-                        // 上一轮刚处理过这篇且字段仍未写入 -> 生成失败, 停止防止死循环
-                        $msg = '第 ' . ($done + 1) . ' 篇生成失败(已中止), 请检查 AI 接口配置后重试';
-                    } else {
-                        TeoSeo_Plugin::applyAiToCid($cid, false);
-                        header('Location: ' . $baseRedirect
-                            . '&batch=1&_=' . rawurlencode($security->getToken($tokenName))
-                            . '&done=' . ($done + 1) . '&last=' . $cid);
-                        exit;
-                    }
-                } else {
-                    $msg = '批量生成完成, 本次共处理 ' . $done . ' 篇文章';
-                }
-            } catch (\Throwable $e) {
-                $msg = '批量生成中断: ' . $e->getMessage();
+        // 批量: 每请求处理一篇, JS 循环调用直到 done
+        if (isset($_GET['batch']) && '1' === (string) $_GET['batch']) {
+            $row = $db->fetchRow($db->query(
+                "SELECT c.cid FROM `{$prefix}contents` c
+                 LEFT JOIN `{$prefix}fields` f ON f.cid = c.cid AND f.name = 'teoseo_ai_summary'
+                 WHERE c.type = 'post' AND c.status = 'publish' AND f.cid IS NULL
+                 ORDER BY c.cid ASC LIMIT 1"
+            ));
+            if (!$row) {
+                echo json_encode(array('ok' => true, 'done' => true, 'msg' => '批量生成完成'));
+                exit;
             }
+            $r = TeoSeo_Plugin::applyAiToCid(intval($row['cid']), false);
+            echo json_encode(array('ok' => $r[0], 'done' => false, 'msg' => $r[1]));
+            exit;
         }
-    }
-}
 
-// ===== 单篇生成(POST) =====
-// 注意: AI 生成是异步的。之前同步等接口, 虚拟主机 max_execution_time=30s,
-// 接口一慢脚本就被掐死——字段和日志可能已写完, 但跳转永远发不出去, 页面白屏。
-// 现在: 立即跳回面板显示"已提交", 生成挂到请求收尾(shutdown)执行,
-// 页面配 6 秒自动刷新, 结果自动出现。
-if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['generate'])) {
-    if (isset($_POST['_']) && $_POST['_'] === $security->getToken($tokenName)) {
-        $cid   = max(0, intval(isset($_POST['cid']) ? $_POST['cid'] : 0));
-        $force = isset($_POST['force']);
-        if ($cid > 0) {
-            $msg = '生成任务已提交, 约 6 秒后自动刷新查看结果';
-            register_shutdown_function(function () use ($cid, $force) {
-                try {
-                    TeoSeo_Plugin::applyAiToCid($cid, $force);
-                } catch (\Throwable $e) {
-                    error_log('[TeoSeo-AI] 面板异步生成失败: ' . $e->getMessage());
-                }
-            });
-        } else {
-            $msg = '参数错误';
-        }
-    } else {
-        $msg = '校验失败, 请刷新页面重试';
+        // 单篇
+        $cid   = max(0, intval(isset($_GET['cid']) ? $_GET['cid'] : 0));
+        $force = isset($_GET['force']);
+        $r     = TeoSeo_Plugin::applyAiToCid($cid, $force);
+        echo json_encode(array('ok' => $r[0], 'msg' => $r[1]));
+        exit;
+    } catch (\Throwable $e) {
+        echo json_encode(array('ok' => false, 'msg' => '生成异常: ' . $e->getMessage()));
+        exit;
     }
-    header('Location: ' . $baseRedirect . '&msg=' . rawurlencode($msg));
-    // 关键一步: 立刻把 302 发出去再跑 AI。
-    // 虚拟主机 output_buffering=4096, 不主动 flush 的话响应会被憋在缓冲区,
-    // exit 后先跑 shutdown(AI 最长 30s)再发 → 浏览器白屏干等。
-    // fastcgi_finish_request 同时释放 FPM worker, 跳转后的面板页不用排队。
-    if (function_exists('fastcgi_finish_request')) {
-        fastcgi_finish_request();
-    } else {
-        while (ob_get_level() > 0) {
-            ob_end_flush();
-        }
-        flush();
-    }
-    exit;
 }
 
 if (isset($_GET['msg'])) {
@@ -156,26 +113,24 @@ include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
             <div class="flex items-center justify-between flex-wrap gap-2">
                 <h2 class="text-base font-semibold">批量生成摘要与关键词</h2>
                 <?php if ($pendingCount > 0): ?>
-                <a href="extending.php?panel=TeoSeo%2Fai.php&batch=1&_=<?php echo rawurlencode($security->getToken($tokenName)); ?>"
-                   style="padding:8px 20px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-size:14px; text-decoration:none; cursor:pointer;">
+                <button type="button" id="teoseoBatchBtn"
+                   style="padding:8px 20px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-size:14px; cursor:pointer;">
                     批量生成(待生成 <?php echo $pendingCount; ?> 篇)
-                </a>
+                </button>
                 <?php else: ?>
                 <span style="color:#16a34a; font-size:13px;">全部文章均已生成 AI 摘要</span>
                 <?php endif; ?>
             </div>
             <p style="color:#9ca3af; font-size:12px; margin-top:8px;">
-                批量生成逐篇进行(每篇一次接口调用), 页面会自动跳转直至完成, 期间请保持页面打开。
-                生成失败的文章不会反复重试, 请先在设置页确认 AI 接口配置。生成结果会同步写入推送历史(目标: AI摘要)。
+                批量生成逐篇进行(每篇一次接口调用), 全程在后台跑, 页面不会跳转。
+                生成失败的文章不会反复重试; 结果同步写入推送历史(目标: AI摘要)。
             </p>
+            <p id="teoseoMsg" style="display:none; padding:10px 12px; border-radius:6px; margin-top:12px;"></p>
 <?php if (NULL !== $msg): ?>
             <p style="padding:10px 12px; border-radius:6px; margin-top:12px;
                       background:<?php echo (false === strpos($msg, '失败') && false === strpos($msg, '关闭') && false === strpos($msg, '未') && false === strpos($msg, '校验') && false === strpos($msg, '中止')) ? '#f0fdf4; color:#166534' : '#fef2f2; color:#b91c1c'; ?>;">
                 <?php echo htmlspecialchars($msg); ?>
             </p>
-<?php if (false !== strpos((string) $msg, '已提交')): ?>
-            <script>setTimeout(function(){ location.reload(); }, 6000);</script>
-<?php endif; ?>
 <?php endif; ?>
         </div>
 
@@ -194,7 +149,7 @@ include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
                 $hasSummary = ('' !== trim((string) $row['summary']));
                 $kw = trim((string) $row['keywords']);
 ?>
-                <tr>
+                <tr id="row-<?php echo intval($row['cid']); ?>">
                     <td style="padding:8px; border:1px solid #ddd; max-width:260px;">
                         <div style="font-weight:600; word-break:break-all;"><?php echo htmlspecialchars($row['title']); ?></div>
                         <div style="color:#9ca3af; font-size:12px;"><?php echo htmlspecialchars($row['slug']); ?></div>
@@ -208,24 +163,15 @@ include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
                         <?php echo '' !== $kw ? htmlspecialchars($kw) : '-'; ?>
                     </td>
                     <td style="padding:8px; border:1px solid #ddd; white-space:nowrap;">
-                        <form method="post" action="" style="display:inline-block; margin:0 4px 0 0;">
-                            <input type="hidden" name="_" value="<?php echo $security->getToken($tokenName); ?>">
-                            <input type="hidden" name="generate" value="1">
-                            <input type="hidden" name="cid" value="<?php echo intval($row['cid']); ?>">
-                            <button type="submit" style="padding:5px 12px; background:#2563eb; color:#fff; border:none; border-radius:5px; font-size:12px; cursor:pointer;">
-                                <?php echo $hasSummary ? '重新生成' : '生成'; ?>
-                            </button>
-                        </form>
+                        <button type="button" onclick="teoseoGen(<?php echo intval($row['cid']); ?>, false, this)"
+                                style="padding:5px 12px; background:#2563eb; color:#fff; border:none; border-radius:5px; font-size:12px; cursor:pointer;">
+                            <?php echo $hasSummary ? '重新生成' : '生成'; ?>
+                        </button>
 <?php if ($hasSummary): ?>
-                        <form method="post" action="" style="display:inline-block; margin:0;">
-                            <input type="hidden" name="_" value="<?php echo $security->getToken($tokenName); ?>">
-                            <input type="hidden" name="generate" value="1">
-                            <input type="hidden" name="force" value="1">
-                            <input type="hidden" name="cid" value="<?php echo intval($row['cid']); ?>">
-                            <button type="submit" style="padding:5px 12px; background:#d97706; color:#fff; border:none; border-radius:5px; font-size:12px; cursor:pointer;">
-                                强制覆盖
-                            </button>
-                        </form>
+                        <button type="button" onclick="teoseoGen(<?php echo intval($row['cid']); ?>, true, this)"
+                                style="padding:5px 12px; background:#d97706; color:#fff; border:none; border-radius:5px; font-size:12px; cursor:pointer;">
+                            强制覆盖
+                        </button>
 <?php endif; ?>
                     </td>
                 </tr>
@@ -238,5 +184,69 @@ include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
         </div>
     </div>
 </main>
+
+<script>
+var TEOSEO_BASE = 'extending.php?panel=TeoSeo%2Fai.php';
+var TEOSEO_TOKEN = '<?php echo $security->getToken($tokenName); ?>';
+
+function teoseoShowMsg(text, ok) {
+    var el = document.getElementById('teoseoMsg');
+    el.style.display = 'block';
+    el.style.background = ok ? '#f0fdf4' : '#fef2f2';
+    el.style.color = ok ? '#166534' : '#b91c1c';
+    el.textContent = text;
+}
+
+function teoseoGen(cid, force, btn) {
+    if (btn.disabled) return;
+    var old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '生成中…';
+    fetch(TEOSEO_BASE + '&ajax=1&cid=' + cid + '&force=' + (force ? '1' : '0') + '&_=' + encodeURIComponent(TEOSEO_TOKEN))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            teoseoShowMsg(j.msg, j.ok);
+            // 刷新本行显示(摘要列/关键词列/按钮状态)
+            location.reload();
+        })
+        .catch(function (e) {
+            btn.disabled = false;
+            btn.textContent = old;
+            teoseoShowMsg('请求失败: ' + e.message, false);
+        });
+}
+
+function teoseoBatch() {
+    var btn = document.getElementById('teoseoBatchBtn');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '批量生成中…';
+    teoseoShowMsg('开始批量生成, 每篇一次接口调用, 请保持页面打开…', true);
+    var step = function () {
+        fetch(TEOSEO_BASE + '&ajax=1&batch=1&_=' + encodeURIComponent(TEOSEO_TOKEN))
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (j.done) {
+                    teoseoShowMsg(j.msg, true);
+                    location.reload();
+                    return;
+                }
+                teoseoShowMsg(j.msg, j.ok);
+                step(); // 继续下一篇
+            })
+            .catch(function (e) {
+                btn.disabled = false;
+                btn.textContent = '批量生成';
+                teoseoShowMsg('批量生成中断: ' + e.message, false);
+            });
+    };
+    step();
+}
+
+var teoseoBatchEl = document.getElementById('teoseoBatchBtn');
+if (teoseoBatchEl) {
+    teoseoBatchEl.onclick = teoseoBatch;
+}
+</script>
 
 <?php include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'footer.php'; ?>
