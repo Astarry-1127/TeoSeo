@@ -39,6 +39,7 @@ class TeoSeo_Client
             . 'JSON 格式: {"summary": "文章摘要", "keywords": "关键词1,关键词2,关键词3"}'
             . '要求: summary 用简体中文概括文章的核心内容与结论，不超过 ' . $summaryLen
             . ' 个字，适合用作搜索引擎的 meta description；keywords 给出 3~8 个简体中文关键词，用英文逗号分隔。'
+            . '注意: summary 只写文章内容本身, 禁止出现"适合用作…"、"这段摘要…"之类的说明性文字。'
             . "\n\n文章标题: " . $title . "\n\n文章正文: " . $content;
 
         $payload = json_encode(array(

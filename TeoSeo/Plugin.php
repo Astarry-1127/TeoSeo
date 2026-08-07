@@ -361,6 +361,10 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
 
         self::saveAiField($cid, 'teoseo_ai_summary', $summary);
         self::saveAiField($cid, 'teoseo_ai_keywords', $keywords);
+        // 同步写入主题(Inaline)识别的 SEO 字段, 让主题输出的 meta description 用上 AI 摘要。
+        // 不然主题自带 description 在前, 插件钩子的去重逻辑会让 AI 摘要永远上不了前台。
+        self::saveAiField($cid, 'seo_description', $summary);
+        self::saveAiField($cid, 'seo_keywords', $keywords);
 
         $len = function_exists('mb_strlen') ? mb_strlen($summary) : strlen($summary);
         self::logAi($row, true, '摘要 ' . $len . ' 字, 关键词: ' . ('' === $keywords ? '无' : $keywords));
