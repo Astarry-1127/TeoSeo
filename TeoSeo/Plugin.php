@@ -517,7 +517,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             $db->query($db->insert('table.fields')->rows(array(
                 'cid'         => $cid,
                 'name'        => $name,
-                'type'        => 0,
+                // type 存字符串类型名('str'), 不是数字! 写 0 会让后台
+                // custom-fields.php 去取不存在的 0_value 键, 刷出一堆警告
+                'type'        => 'str',
                 'str_value'   => $value,
                 'int_value'   => 0,
                 'float_value' => 0,
