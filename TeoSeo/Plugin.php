@@ -67,7 +67,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         // 创建推送日志表
         self::ensureLogTable();
 
-        // 注册后台独立面板「推送历史」与「AI 内容优化」
+        // 注册后台独立面板「推送历史」与「AI 内容优化」(先清旧的同 URL 面板, 保证重复激活不累积菜单)
+        self::ensurePanelUnique(1, 'TeoSeo/logs.php');
+        self::ensurePanelUnique(2, 'TeoSeo/ai.php');
         \Utils\Helper::addPanel(1, 'TeoSeo/logs.php', 'TeoSeo', '推送历史', 'administrator');
         \Utils\Helper::addPanel(2, 'TeoSeo/ai.php', 'TeoSeo', 'AI 内容优化', 'administrator');
 
@@ -75,6 +77,25 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         \Utils\Helper::addAction('teoseo-update', 'TeoSeo_Update');
 
         return _t('TeoSeo 已激活: /sitemap.xml 已就绪, 发布文章将自动推送 IndexNow / 百度, 并自动生成 AI 摘要与关键词。');
+    }
+
+    /**
+     * 确保后台面板不重复: 先移除同 URL 的旧面板, 再让 activate() 重新添加。
+     *
+     * Helper::addPanel 每次激活都会无条件追加一条菜单(不像 file 那样 array_unique),
+     * 重复激活/升级会把「推送历史」「AI 内容优化」累积成多个 TeoSeo 菜单项。
+     * 在 addPanel 之前调用本方法即可保证幂等。
+     *
+     * @param int $index 菜单索引
+     * @param string $fileName 面板文件路径
+     */
+    private static function ensurePanelUnique(int $index, string $fileName)
+    {
+        try {
+            \Utils\Helper::removePanel($index, $fileName);
+        } catch (\Throwable $e) {
+            // 首次激活时面板表可能为空, removePanel 抛错可忽略
+        }
     }
 
     /**
