@@ -9,6 +9,13 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  * 通过 Helper::addPanel 注册, 由 admin/extending.php 加载。
  */
 
+// ===== 分页参数 =====
+$page       = max(1, intval(isset($_GET['page']) ? $_GET['page'] : 1));
+$perPage    = 20;
+$maxPage    = 999; // 最高限制 999 页
+$page       = min($page, $maxPage);
+$offset     = ($page - 1) * $perPage;
+
 // ===== 处理手动推送 POST =====
 $pushResult = NULL;
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
@@ -82,7 +89,21 @@ include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
 try {
     $db     = \Typecho\Db::get();
     $prefix = $db->getPrefix();
-    $rows   = $db->fetchAll($db->query("SELECT * FROM `{$prefix}seo_logs` ORDER BY `id` DESC LIMIT 50"));
+
+    // 总记录数与总页数(翻页用)
+    $total = intval($db->fetchObject($db->query(
+        "SELECT COUNT(*) AS n FROM `{$prefix}seo_logs`"
+    ))->n);
+    $totalPages = max(1, intval(ceil($total / $perPage)));
+    if ($totalPages > $maxPage) {
+        $totalPages = $maxPage;
+    }
+    if ($page > $totalPages) {
+        $page = $totalPages;
+        $offset = ($page - 1) * $perPage;
+    }
+
+    $rows   = $db->fetchAll($db->query("SELECT * FROM `{$prefix}seo_logs` ORDER BY `id` DESC LIMIT {$offset}, {$perPage}"));
 
     if (empty($rows)) {
         echo '<p style="color:#999;">暂无推送记录, 发布新文章后这里会显示每次推送给搜索引擎的结果。</p>';
@@ -113,8 +134,30 @@ try {
         }
 
         echo '</tbody></table>';
-        echo '<p style="color:#999; font-size:12px; margin-top:1em;">仅显示最近 50 条, 完整记录保留在数据库 '
-            . $prefix . 'seo_logs 表。</p>';
+        echo '<p style="color:#999; font-size:12px; margin-top:1em;">共 '
+            . $total . ' 条记录, 当前第 ' . $page . ' / ' . $totalPages . ' 页, 每页 ' . $perPage
+            . ' 条。</p>';
+
+        // 分页导航
+        echo '<div style="margin-top:16px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">';
+        if ($page > 1) {
+            echo '<a href="extending.php?panel=TeoSeo%2Flogs.php&page=1" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">首页</a>';
+            echo '<a href="extending.php?panel=TeoSeo%2Flogs.php&page=' . ($page - 1) . '" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">上一页</a>';
+        }
+        $start = max(1, $page - 4);
+        $end   = min($totalPages, $page + 4);
+        for ($i = $start; $i <= $end; $i++) {
+            if ($i == $page) {
+                echo '<span style="padding:5px 10px; border:1px solid #2563eb; border-radius:5px; font-size:12px; background:#2563eb; color:#fff;">' . $i . '</span>';
+            } else {
+                echo '<a href="extending.php?panel=TeoSeo%2Flogs.php&page=' . $i . '" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">' . $i . '</a>';
+            }
+        }
+        if ($page < $totalPages) {
+            echo '<a href="extending.php?panel=TeoSeo%2Flogs.php&page=' . ($page + 1) . '" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">下一页</a>';
+            echo '<a href="extending.php?panel=TeoSeo%2Flogs.php&page=' . $totalPages . '" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">末页</a>';
+        }
+        echo '</div>';
     }
 } catch (\Throwable $e) {
     echo '<p style="color:#dc2626;">推送历史读取失败: ' . htmlspecialchars($e->getMessage()) . '</p>';

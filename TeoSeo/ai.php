@@ -66,8 +66,15 @@ if (isset($_GET['msg'])) {
     $msg = $_GET['msg'];
 }
 
-// 统计待生成文章数 + 最近 50 篇文章列表(未生成的排前面)
+// 统计待生成文章数 + 文章列表(分页, 未生成的排前面)
+$page         = max(1, intval(isset($_GET['page']) ? $_GET['page'] : 1));
+$perPage      = 20;
+$maxPage      = 999; // 最高限制 999 页
+$page         = min($page, $maxPage);
+$offset       = ($page - 1) * $perPage;
 $pendingCount = 0;
+$totalPages   = 1;
+$total        = 0;
 $rows         = array();
 try {
     $db     = \Typecho\Db::get();
@@ -79,6 +86,20 @@ try {
          WHERE c.type = 'post' AND c.status = 'publish' AND f.cid IS NULL"
     ))->n);
 
+    // 已发布文章总数(翻页用)
+    $total = intval($db->fetchObject($db->query(
+        "SELECT COUNT(*) AS n FROM `{$prefix}contents` c
+         WHERE c.type = 'post' AND c.status = 'publish'"
+    ))->n);
+    $totalPages = max(1, intval(ceil($total / $perPage)));
+    if ($totalPages > $maxPage) {
+        $totalPages = $maxPage;
+    }
+    if ($page > $totalPages) {
+        $page = $totalPages;
+        $offset = ($page - 1) * $perPage;
+    }
+
     $rows = $db->fetchAll($db->query(
         "SELECT c.cid, c.title, c.slug, c.created,
                 f.str_value AS summary, k.str_value AS keywords
@@ -87,7 +108,7 @@ try {
          LEFT JOIN `{$prefix}fields` k ON k.cid = c.cid AND k.name = 'teoseo_ai_keywords'
          WHERE c.type = 'post' AND c.status = 'publish'
          ORDER BY (f.cid IS NULL) DESC, c.cid DESC
-         LIMIT 50"
+         LIMIT {$offset}, {$perPage}"
     ));
 } catch (\Throwable $e) {
     $msg = '文章列表读取失败: ' . $e->getMessage();
@@ -178,8 +199,27 @@ include __TYPECHO_ROOT_DIR__ . __TYPECHO_ADMIN_DIR__ . 'menu.php';
 <?php endforeach; ?>
                 </tbody></table>
             <p style="color:#999; font-size:12px; margin-top:1em;">
-                仅显示最近 50 篇已发布文章(未生成摘要的排在前面)。
+                共 <?php echo $total; ?> 篇已发布文章, 当前第 <?php echo $page; ?> / <?php echo $totalPages; ?> 页, 每页 <?php echo $perPage; ?> 篇(未生成摘要的排在前面)。
             </p>
+            <div style="margin-top:16px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+<?php if ($page > 1): ?>
+                <a href="extending.php?panel=TeoSeo%2Fai.php&page=1" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">首页</a>
+                <a href="extending.php?panel=TeoSeo%2Fai.php&page=<?php echo ($page - 1); ?>" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">上一页</a>
+<?php endif;
+                $pgStart = max(1, $page - 4);
+                $pgEnd   = min($totalPages, $page + 4);
+                for ($i = $pgStart; $i <= $pgEnd; $i++):
+                    if ($i == $page): ?>
+                <span style="padding:5px 10px; border:1px solid #2563eb; border-radius:5px; font-size:12px; background:#2563eb; color:#fff;"><?php echo $i; ?></span>
+<?php               else: ?>
+                <a href="extending.php?panel=TeoSeo%2Fai.php&page=<?php echo $i; ?>" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;"><?php echo $i; ?></a>
+<?php               endif;
+                endfor;
+                if ($page < $totalPages): ?>
+                <a href="extending.php?panel=TeoSeo%2Fai.php&page=<?php echo ($page + 1); ?>" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">下一页</a>
+                <a href="extending.php?panel=TeoSeo%2Fai.php&page=<?php echo $totalPages; ?>" style="padding:5px 10px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; text-decoration:none; color:#374151;">末页</a>
+<?php endif; ?>
+            </div>
 <?php endif; ?>
         </div>
     </div>
