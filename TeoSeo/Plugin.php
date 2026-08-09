@@ -222,7 +222,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
 
         // 自动更新区块
         $updateToken = \Typecho\Widget::widget('Widget_Security')->getToken('teoseo-update');
-        echo '<div style="margin:2em 0 1em; border-top:1px dashed #ddd; padding-top:1em;">';
+        echo '<div id="teoseoUpdateBlock" style="margin:2em 0 1em; border-top:1px dashed #ddd; padding-top:1em;">';
         echo '<h3 style="margin:0 0 0.8em;">自动更新</h3>';
         echo '<p style="color:#666; font-size:13px; margin:0 0 0.8em;">'
             . _t('当前版本 <strong>v' . self::VERSION . '</strong>。自动更新从 GitHub main 分支拉取最新代码, 更新前自动备份旧版到 <code>usr/plugins/TeoSeo-backup/</code>, 更新后自动重启插件。')
@@ -246,6 +246,8 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             . 'function post(action,cb){fetch(base+"?action="+action,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","X-Requested-With":"XMLHttpRequest"},body:"_="+encodeURIComponent(token)+"&action="+action}).then(function(r){return r.json();}).then(cb).catch(function(e){show("请求失败: "+e.message,false);});}'
             . 'checkBtn.onclick=function(){checkBtn.disabled=true;checkBtn.textContent="检查中…";post("check",function(j){checkBtn.disabled=false;checkBtn.textContent="检查更新";show(j.msg,j.ok);if(j.ok&&j.data&&j.data.hasUpdate){upBtn.style.display="inline-block";}else{upBtn.style.display="none";}});};'
             . 'upBtn.onclick=function(){if(!confirm("确定要更新插件吗? 更新前会自动备份旧版。"))return;upBtn.disabled=true;upBtn.textContent="更新中…";post("update",function(j){upBtn.disabled=false;upBtn.textContent="立即更新";show(j.msg,j.ok);if(j.ok){upBtn.style.display="none";setTimeout(function(){location.reload();},1500);}});};'
+            . 'function moveBlock(){var blk=document.getElementById("teoseoUpdateBlock");if(!blk)return;var f=document.querySelector("form");if(!f)return;var submit=f.querySelector("input[type=submit],button[type=submit]");if(submit){submit.parentNode.insertBefore(blk,submit);}else{f.appendChild(blk);}}'
+            . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",moveBlock);}else{window.setTimeout(moveBlock,0);}'
             . '})();'
             . '</script>';
     }
