@@ -26,7 +26,7 @@ if (!interface_exists('Typecho_Plugin_Interface', false)) {
  *
  * @package TeoSeo
  * @author Astarry
- * @version 1.2.0
+ * @version 1.2.1
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
