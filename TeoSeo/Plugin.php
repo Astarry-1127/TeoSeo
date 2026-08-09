@@ -41,6 +41,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     /** 推送日志表名(不含前缀) */
     const LOG_TABLE = 'seo_logs';
 
+    /** 插件版本号(与文件头 @version 保持一致, 自动更新以此比较) */
+    const VERSION = '1.2.1';
+
     /**
      * 插件激活
      *
@@ -68,6 +71,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         \Utils\Helper::addPanel(1, 'TeoSeo/logs.php', 'TeoSeo', '推送历史', 'administrator');
         \Utils\Helper::addPanel(2, 'TeoSeo/ai.php', 'TeoSeo', 'AI 内容优化', 'administrator');
 
+        // 自动更新 action(/action/teoseo-update, TeoSeo_Update 由 autoload 加载 Update.php)
+        \Utils\Helper::addAction('teoseo-update', 'TeoSeo_Update');
+
         return _t('TeoSeo 已激活: /sitemap.xml 已就绪, 发布文章将自动推送 IndexNow / 百度, 并自动生成 AI 摘要与关键词。');
     }
 
@@ -81,6 +87,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         \Utils\Helper::removeRoute(self::SITEMAP_ROUTE);
         \Utils\Helper::removePanel(1, 'TeoSeo/logs.php');
         \Utils\Helper::removePanel(2, 'TeoSeo/ai.php');
+        \Utils\Helper::removeAction('teoseo-update');
     }
 
     /**
@@ -210,6 +217,35 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             . '}'
             . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",mask);}'
             . 'else{window.setTimeout(mask,0);}'
+            . '})();'
+            . '</script>';
+
+        // 自动更新区块
+        $updateToken = \Typecho\Widget::widget('Widget_Security')->getToken('teoseo-update');
+        echo '<div style="margin:2em 0 1em; border-top:1px dashed #ddd; padding-top:1em;">';
+        echo '<h3 style="margin:0 0 0.8em;">自动更新</h3>';
+        echo '<p style="color:#666; font-size:13px; margin:0 0 0.8em;">'
+            . _t('当前版本 <strong>v' . self::VERSION . '</strong>。自动更新从 GitHub main 分支拉取最新代码, 更新前自动备份旧版到 <code>usr/plugins/TeoSeo-backup/</code>, 更新后自动重启插件。')
+            . '</p>';
+        echo '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">'
+            . '<button type="button" id="teoseoCheckBtn" style="padding:8px 18px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer;">检查更新</button>'
+            . '<button type="button" id="teoseoUpdateBtn" style="padding:8px 18px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer; display:none;">立即更新</button>'
+            . '</div>';
+        echo '<p id="teoseoUpdateMsg" style="display:none; padding:10px 12px; border-radius:6px; margin-top:12px;"></p>';
+        echo '<input type="hidden" id="teoseoUpdateToken" value="' . $updateToken . '">';
+        echo '</div>';
+
+        echo '<script>'
+            . '(function(){'
+            . 'var base=window.location.origin+"/action/teoseo-update";'
+            . 'var token=document.getElementById("teoseoUpdateToken").value;'
+            . 'var msgEl=document.getElementById("teoseoUpdateMsg");'
+            . 'var checkBtn=document.getElementById("teoseoCheckBtn");'
+            . 'var upBtn=document.getElementById("teoseoUpdateBtn");'
+            . 'function show(t,ok){msgEl.style.display="block";msgEl.style.background=ok?"#f0fdf4":"#fef2f2";msgEl.style.color=ok?"#166534":"#b91c1c";msgEl.textContent=t;}'
+            . 'function post(action,cb){fetch(base+"?action="+action,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","X-Requested-With":"XMLHttpRequest"},body:"_="+encodeURIComponent(token)+"&action="+action}).then(function(r){return r.json();}).then(cb).catch(function(e){show("请求失败: "+e.message,false);});}'
+            . 'checkBtn.onclick=function(){checkBtn.disabled=true;checkBtn.textContent="检查中…";post("check",function(j){checkBtn.disabled=false;checkBtn.textContent="检查更新";show(j.msg,j.ok);if(j.ok&&j.data&&j.data.hasUpdate){upBtn.style.display="inline-block";}else{upBtn.style.display="none";}});};'
+            . 'upBtn.onclick=function(){if(!confirm("确定要更新插件吗? 更新前会自动备份旧版。"))return;upBtn.disabled=true;upBtn.textContent="更新中…";post("update",function(j){upBtn.disabled=false;upBtn.textContent="立即更新";show(j.msg,j.ok);if(j.ok){upBtn.style.display="none";setTimeout(function(){location.reload();},1500);}});};'
             . '})();'
             . '</script>';
     }
