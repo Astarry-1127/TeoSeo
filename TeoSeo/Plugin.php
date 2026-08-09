@@ -70,8 +70,8 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         // 注册后台独立面板「推送历史」与「AI 内容优化」(先清旧的同 URL 面板, 保证重复激活不累积菜单)
         self::ensurePanelUnique(1, 'TeoSeo/logs.php');
         self::ensurePanelUnique(2, 'TeoSeo/ai.php');
-        \Utils\Helper::addPanel(1, 'TeoSeo/logs.php', 'TeoSeo', '推送历史', 'administrator');
-        \Utils\Helper::addPanel(2, 'TeoSeo/ai.php', 'TeoSeo', 'AI 内容优化', 'administrator');
+        \Utils\Helper::addPanel(1, 'TeoSeo/logs.php', 'TeoSeo 推送历史', '推送历史', 'administrator');
+        \Utils\Helper::addPanel(2, 'TeoSeo/ai.php', 'TeoSeo AI 内容优化', 'AI 内容优化', 'administrator');
 
         // 自动更新 action(/action/teoseo-update, TeoSeo_Update 由 autoload 加载 Update.php)
         \Utils\Helper::addAction('teoseo-update', 'TeoSeo_Update');
