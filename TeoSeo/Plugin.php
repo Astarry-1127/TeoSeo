@@ -182,6 +182,36 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         echo '<p style="color:#999; font-size:13px; margin-top:1.5em;">'
             . _t('推送历史见左侧菜单: <strong>TeoSeo → 推送历史</strong>(最近 50 条推送结果); 存量文章 AI 生成见 <strong>TeoSeo → AI 内容优化</strong>。')
             . '</p>';
+
+        // 密钥类字段脱敏显示: 前4位明文 + 中间*号 + 后4位明文(不改核心 Config.php, 用 JS 在渲染后替换输入框值)
+        $secretValues = array(
+            'indexnowKey' => '',
+            'baiduToken'  => '',
+            'aiApiKey'    => '',
+        );
+        $existing = self::readConfig();
+        if ($existing) {
+            foreach ($secretValues as $k => $v) {
+                if (isset($existing->$k) && '' !== (string) $existing->$k) {
+                    $secretValues[$k] = self::maskSecret((string) $existing->$k);
+                }
+            }
+        }
+        $jsonMask = json_encode($secretValues, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        echo '<script>'
+            . '(function(){'
+            . 'var m=' . $jsonMask . ';'
+            . 'function mask(){'
+            . 'Object.keys(m).forEach(function(k){'
+            . 'if(!m[k])return;'
+            . 'var el=document.querySelector("input[name=\'"+k+"\']");'
+            . 'if(el)el.value=m[k];'
+            . '});'
+            . '}'
+            . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",mask);}'
+            . 'else{window.setTimeout(mask,0);}'
+            . '})();'
+            . '</script>';
     }
 
     /**
@@ -192,6 +222,49 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     public static function personalConfig(Typecho_Widget_Helper_Form $form)
     {
         return; // 个人配置暂未使用(保持方法体非空, 便于插件信息解析)
+    }
+
+    /**
+     * 后台保存插件配置
+     *
+     * 设置页的 key 类字段(IndexNow / 百度 / AI)在输入框里是脱敏显示(前4后4明文, 中间*号)。
+     * 用户不修改时提交上来的是脱敏串, 这里还原为数据库原值; 只有用户填了全新完整值才覆盖。
+     *
+     * @param array $settings 提交的表单值
+     * @param bool $isInit 是否初始化
+     */
+    public static function configHandle(array $settings, bool $isInit)
+    {
+        $secretKeys = array('indexnowKey', 'baiduToken', 'aiApiKey');
+        if (!$isInit) {
+            $old = self::readConfig();
+            foreach ($secretKeys as $k) {
+                if (isset($settings[$k])) {
+                    $submitted = (string) $settings[$k];
+                    if (false !== strpos($submitted, '*') && $old && isset($old->$k)) {
+                        // 用户没改(还是脱敏占位), 用原值
+                        $settings[$k] = (string) $old->$k;
+                    }
+                }
+            }
+        }
+
+        \Widget\Plugins\Edit::configPlugin('TeoSeo', $settings);
+    }
+
+    /**
+     * 密钥脱敏: 前4位明文 + 中间*号 + 后4位明文(长度不足8位时全部*号)
+     *
+     * @param string $value 原始值
+     * @return string 脱敏串
+     */
+    public static function maskSecret(string $value): string
+    {
+        $len = strlen($value);
+        if ($len <= 8) {
+            return str_repeat('*', $len);
+        }
+        return substr($value, 0, 4) . str_repeat('*', $len - 8) . substr($value, $len - 4);
     }
 
     /**
