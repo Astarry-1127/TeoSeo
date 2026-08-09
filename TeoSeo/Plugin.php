@@ -26,7 +26,7 @@ if (!interface_exists('Typecho_Plugin_Interface', false)) {
  *
  * @package TeoSeo
  * @author Astarry
- * @version 1.2.2
+ * @version 1.2.4
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
@@ -42,7 +42,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     const LOG_TABLE = 'seo_logs';
 
     /** 插件版本号(与文件头 @version 保持一致, 自动更新以此比较) */
-    const VERSION = '1.2.2';
+    const VERSION = '1.2.4';
 
     /**
      * 插件激活
