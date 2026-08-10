@@ -44,6 +44,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     /** 插件版本号(与文件头 @version 保持一致, 自动更新以此比较) */
     const VERSION = '1.3.0';
 
+    /** GEO 适配反馈页面(作者博客, 供使用者反馈希望适配的主题) */
+    const GEO_FEEDBACK_URL = 'https://blog.astarry.cn/feedback/';
+
     /**
      * 插件激活
      *
@@ -212,21 +215,39 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
 
         $geoEnabled = new Typecho_Widget_Helper_Form_Element_Checkbox(
             'geoEnabled', array('enable' => _t('启用 GEO 优化')),
-            array('enable'),
+            array(),
             _t('GEO 开关'),
-            _t('面向生成式引擎(AI 搜索/引用)的优化: ① meta description / og:description 清理(无 markdown 污染, 优先 AI 摘要) ② 输出 BreadcrumbList 结构化数据 ③ 保护文章顶部「本文要点」<code>&lt;details&gt;</code> 折叠块不被解析器破坏。其中折叠块保护需配合 Inaline 主题补丁(见仓库 <code>inaline-patch/</code>), 其他主题可留言请求适配。')
+            _t('默认关闭, 手动开启后生效。面向生成式引擎(AI 搜索/引用)的优化: ① meta description / og:description 清理(无 markdown 污染, 优先 AI 摘要) ② 输出 BreadcrumbList 结构化数据 ③ 保护文章顶部「本文要点」<code>&lt;details&gt;</code> 折叠块不被解析器破坏。其中折叠块保护需配合 Inaline 主题补丁(见仓库 <code>inaline-patch/</code>), 其他主题可留言请求适配。')
         );
         $form->addInput($geoEnabled);
 
         // GEO 主题适配检测: 非 Inaline 主题时, 勾选「启用 GEO 优化」弹窗提示适配范围
+        // (双按钮: 确定=关闭弹窗, 反馈=跳转作者博客反馈页)
         $themeName = strtolower(trim((string) \Utils\Helper::options()->theme));
         if ('inaline' !== $themeName) {
-            $alertMsg = _t('此功能目前仅适配 Inaline 主题。如果需要为您所使用的主题适配, 可在 GitHub 提交 issue 或在博客留言, 作者会尽力适配。');
-            echo '<script>'
+            $feedbackUrl = self::GEO_FEEDBACK_URL;
+            echo '<style>'
+                . '#teoseoGeoModal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:none;align-items:center;justify-content:center}'
+                . '#teoseoGeoModal .box{background:#fff;border-radius:10px;max-width:440px;padding:24px 28px;box-shadow:0 10px 30px rgba(0,0,0,.2);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}'
+                . '#teoseoGeoModal .box h4{margin:0 0 8px;font-size:15px}'
+                . '#teoseoGeoModal .box p{margin:0;color:#555;font-size:13px;line-height:1.7}'
+                . '#teoseoGeoModal .btns{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}'
+                . '#teoseoGeoModal .btns a,#teoseoGeoModal .btns button{padding:8px 18px;border-radius:6px;text-decoration:none;font-size:13px;cursor:pointer;border:none}'
+                . '#teoseoGeoModal .btn-ok{background:#e5e7eb;color:#333}'
+                . '#teoseoGeoModal .btn-fb{background:#2563eb;color:#fff}'
+                . '</style>'
+                . '<div id="teoseoGeoModal"><div class="box">'
+                . '<h4>' . _t('GEO 优化主题适配提示') . '</h4>'
+                . '<p>' . _t('此功能目前仅适配 <strong>Inaline</strong> 主题。如果需要为您所使用的主题适配, 点击「反馈」前往作者博客留言, 作者会尽力适配。') . '</p>'
+                . '<div class="btns">'
+                . '<button type="button" class="btn-ok" onclick="document.getElementById(\'teoseoGeoModal\').style.display=\'none\'">' . _t('确定') . '</button>'
+                . '<a href="' . htmlspecialchars($feedbackUrl, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener" class="btn-fb">' . _t('反馈') . '</a>'
+                . '</div></div></div>'
+                . '<script>'
                 . '(function(){'
                 . 'var cb=document.querySelector("input[name^=\'geoEnabled\']");'
                 . 'if(!cb)return;'
-                . 'function onGeoChange(){if(cb.checked){alert(' . json_encode($alertMsg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) . ');}}'
+                . 'function onGeoChange(){if(cb.checked){var m=document.getElementById("teoseoGeoModal");if(m)m.style.display="flex";}}'
                 . 'cb.addEventListener("change",onGeoChange);'
                 . '})();'
                 . '</script>';
@@ -831,7 +852,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     /**
      * GEO 优化是否启用(设置页「GEO 开关」)
      *
-     * 未配置/未显式关闭时默认启用(装上即有 GEO 优化)。
+     * 默认关闭, 需用户手动开启; 开启后非 Inaline 主题会在设置页弹窗提示适配范围。
      *
      * @return bool
      */
@@ -839,7 +860,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     {
         $config = self::readConfig();
         if (NULL === $config || !isset($config->geoEnabled)) {
-            return true;
+            return false;
         }
         return is_array($config->geoEnabled) && in_array('enable', $config->geoEnabled);
     }
