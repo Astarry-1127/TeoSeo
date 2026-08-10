@@ -15,6 +15,16 @@
    - JSON-LD Article + BreadcrumbList
    - 支持文章顶部「本文要点」折叠块（`<details>`），让 AI 引擎直接读到结论先行内容
 
+## 功能截图
+
+![插件设置页](screenshots/teoseo-settings.jpg)
+
+![批量生成前:文章摘要与关键词均未生成](screenshots/teoseo-ai-panel-before.jpg)
+
+![批量生成后:摘要与关键词自动填充,按钮变为更新生成](screenshots/teoseo-ai-panel-after.jpg)
+
+![推送历史面板](screenshots/teoseo-push-history.png)
+
 ## 安装
 
 1. 上传 `TeoSeo/` 目录到 `usr/plugins/`（完整目录名为 `usr/plugins/TeoSeo/`）
