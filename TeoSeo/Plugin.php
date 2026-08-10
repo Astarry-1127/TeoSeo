@@ -218,6 +218,20 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         );
         $form->addInput($geoEnabled);
 
+        // GEO 主题适配检测: 非 Inaline 主题时, 勾选「启用 GEO 优化」弹窗提示适配范围
+        $themeName = strtolower(trim((string) \Utils\Helper::options()->theme));
+        if ('inaline' !== $themeName) {
+            $alertMsg = _t('此功能目前仅适配 Inaline 主题。如果需要为您所使用的主题适配, 可在 GitHub 提交 issue 或在博客留言, 作者会尽力适配。');
+            echo '<script>'
+                . '(function(){'
+                . 'var cb=document.querySelector("input[name^=\'geoEnabled\']");'
+                . 'if(!cb)return;'
+                . 'function onGeoChange(){if(cb.checked){alert(' . json_encode($alertMsg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) . ');}}'
+                . 'cb.addEventListener("change",onGeoChange);'
+                . '})();'
+                . '</script>';
+        }
+
         echo '<p style="color:#999; font-size:13px; margin-top:1.5em;">'
             . _t('推送历史见左侧菜单: <strong>TeoSeo → 推送历史</strong>(最近 50 条推送结果); 存量文章 AI 生成见 <strong>TeoSeo → AI 内容优化</strong>。')
             . '</p>';
