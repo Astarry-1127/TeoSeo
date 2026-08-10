@@ -207,6 +207,17 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         );
         $form->addInput($aiSkipVerifySSL);
 
+        /** GEO 优化配置 */
+        echo '<h3 style="margin:2em 0 0.8em; border-top:1px dashed #ddd; padding-top:1em;">GEO 优化</h3>';
+
+        $geoEnabled = new Typecho_Widget_Helper_Form_Element_Checkbox(
+            'geoEnabled', array('enable' => _t('启用 GEO 优化')),
+            array('enable'),
+            _t('GEO 开关'),
+            _t('面向生成式引擎(AI 搜索/引用)的优化: ① meta description / og:description 清理(无 markdown 污染, 优先 AI 摘要) ② 输出 BreadcrumbList 结构化数据 ③ 保护文章顶部「本文要点」<code>&lt;details&gt;</code> 折叠块不被解析器破坏。其中折叠块保护需配合 Inaline 主题补丁(见仓库 <code>inaline-patch/</code>), 其他主题可留言请求适配。')
+        );
+        $form->addInput($geoEnabled);
+
         echo '<p style="color:#999; font-size:13px; margin-top:1.5em;">'
             . _t('推送历史见左侧菜单: <strong>TeoSeo → 推送历史</strong>(最近 50 条推送结果); 存量文章 AI 生成见 <strong>TeoSeo → AI 内容优化</strong>。')
             . '</p>';
@@ -598,45 +609,47 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
                 . json_encode($jsonLd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)
                 . '</script>' . "\n";
 
-            // BreadcrumbList 结构化数据: 帮助搜索引擎与 AI 引擎理解站点层级
-            $crumb = array(
-                '@context'        => 'https://schema.org',
-                '@type'           => 'BreadcrumbList',
-                'itemListElement' => array(
-                    array(
-                        '@type'    => 'ListItem',
-                        'position' => 1,
-                        'name'     => '首页',
-                        'item'     => rtrim((string) $options->siteUrl, '/') . '/',
-                    ),
-                ),
-            );
-            try {
-                // 注意: $archive->categories 是重载属性, 不能对它用 reset()(引用语义会报
-                // "Indirect modification of overloaded property") —— 先取副本再索引
-                $cats = $archive->categories;
-                if (is_array($cats) && count($cats) > 0) {
-                    $first = $cats[0];
-                    $catName = trim((string) (isset($first['name']) ? $first['name'] : ''));
-                    if ('' !== $catName) {
-                        $crumb['itemListElement'][] = array(
+            // BreadcrumbList 结构化数据: 帮助搜索引擎与 AI 引擎理解站点层级(GEO 开关控制)
+            if (self::geoEnabled()) {
+                $crumb = array(
+                    '@context'        => 'https://schema.org',
+                    '@type'           => 'BreadcrumbList',
+                    'itemListElement' => array(
+                        array(
                             '@type'    => 'ListItem',
-                            'position' => 2,
-                            'name'     => $catName,
-                        );
+                            'position' => 1,
+                            'name'     => '首页',
+                            'item'     => rtrim((string) $options->siteUrl, '/') . '/',
+                        ),
+                    ),
+                );
+                try {
+                    // 注意: $archive->categories 是重载属性, 不能对它用 reset()(引用语义会报
+                    // "Indirect modification of overloaded property") —— 先取副本再索引
+                    $cats = $archive->categories;
+                    if (is_array($cats) && count($cats) > 0) {
+                        $first = $cats[0];
+                        $catName = trim((string) (isset($first['name']) ? $first['name'] : ''));
+                        if ('' !== $catName) {
+                            $crumb['itemListElement'][] = array(
+                                '@type'    => 'ListItem',
+                                'position' => 2,
+                                'name'     => $catName,
+                            );
+                        }
                     }
+                } catch (\Throwable $e) {
                 }
-            } catch (\Throwable $e) {
+                $crumb['itemListElement'][] = array(
+                    '@type'    => 'ListItem',
+                    'position' => count($crumb['itemListElement']) + 1,
+                    'name'     => trim((string) $archive->title),
+                    'item'     => (string) $archive->permalink,
+                );
+                echo '<script type="application/ld+json">'
+                    . json_encode($crumb, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)
+                    . '</script>' . "\n";
             }
-            $crumb['itemListElement'][] = array(
-                '@type'    => 'ListItem',
-                'position' => count($crumb['itemListElement']) + 1,
-                'name'     => trim((string) $archive->title),
-                'item'     => (string) $archive->permalink,
-            );
-            echo '<script type="application/ld+json">'
-                . json_encode($crumb, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)
-                . '</script>' . "\n";
         } catch (\Throwable $e) {
             error_log('[TeoSeo-AI] outputHeaderMeta failed: ' . $e->getMessage());
         }
@@ -677,6 +690,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     public static function cleanHeaderOptions(array $allows, $archive): array
     {
         try {
+            if (!self::geoEnabled()) {
+                return $allows;
+            }
             if (!($archive instanceof \Widget\Archive) || (!$archive->is('post') && !$archive->is('page'))) {
                 return $allows;
             }
@@ -726,6 +742,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     public static function cleanExcerpt($excerpt, $contents)
     {
         try {
+            if (!self::geoEnabled()) {
+                return $excerpt;
+            }
             $cid = (isset($contents->cid) && $contents->cid) ? intval($contents->cid) : 0;
             if ($cid > 0) {
                 $summary = self::getAiField($cid, 'teoseo_ai_summary');
@@ -750,6 +769,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
      */
     public static function markdown(?string $text): ?string
     {
+        if (!self::geoEnabled()) {
+            return null;
+        }
         if (null === $text || false === strpos($text, '<details')) {
             return null;
         }
@@ -790,6 +812,22 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         } catch (\Throwable $e) {
             return NULL;
         }
+    }
+
+    /**
+     * GEO 优化是否启用(设置页「GEO 开关」)
+     *
+     * 未配置/未显式关闭时默认启用(装上即有 GEO 优化)。
+     *
+     * @return bool
+     */
+    private static function geoEnabled(): bool
+    {
+        $config = self::readConfig();
+        if (NULL === $config || !isset($config->geoEnabled)) {
+            return true;
+        }
+        return is_array($config->geoEnabled) && in_array('enable', $config->geoEnabled);
     }
 
     /**
