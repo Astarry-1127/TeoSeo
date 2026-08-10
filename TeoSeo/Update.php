@@ -271,33 +271,24 @@ class TeoSeo_Update extends \Typecho\Widget implements \Widget\ActionInterface
             $this->out(false, '更新失败: 没有文件被覆盖(目标目录不可写?)');
         }
 
-        // 7. 重启插件(停用再启用, 重建钩子)
+        // 7. 重启插件(重建钩子)
+        // 正确升级法: 重置内存 + 清空 DB 注册表, 再重新 activate(注册路由/面板/钩子),
+        // 最后把 export() 写回 DB。否则只覆盖文件不重建钩子, 新版新增钩子(如 GEO 的
+        // headerOptions/excerpt/markdown)不会被注册, 且 DB 残留旧 handles 会导致设置页 500。
         $reloaded = true;
         try {
-            // 读取当前激活的插件列表
-            $plugins = \Typecho\Plugin::export();
-            $active = isset($plugins['activated']) && is_array($plugins['activated'])
-                ? array_keys($plugins['activated']) : array();
+            $db = \Typecho\Db::get();
+            \Typecho\Plugin::init(array('handles' => array(), 'activated' => array()));
+            $db->query($db->update('table.options')
+                ->rows(array('value' => json_encode(array('handles' => array(), 'activated' => array()))))
+                ->where('name = ?', 'plugins'));
 
-            // 重新加载 Plugin.php(新版本类可能已变)
-            // 先移除旧 action/panel/route, 再重新 activate
-            $actives = array();
-            if (isset($plugins['activated']) && is_array($plugins['activated'])) {
-                foreach ($plugins['activated'] as $name => $info) {
-                    if ($name === 'TeoSeo') {
-                        continue; // 排除自身
-                    }
-                    $actives[$name] = $info;
-                }
-            }
-            $plugins['activated'] = $actives;
-            \Typecho\Db::get()->query(\Typecho\Db::get()->update('table.options')->rows(array(
-                'value' => json_encode($plugins),
-            ))->where('name = ?', 'plugins'));
-
-            // 重新激活
-            \TeoSeo_Plugin::deactivate();
             \TeoSeo_Plugin::activate();
+            \Typecho\Plugin::activate('TeoSeo');
+
+            $db->query($db->update('table.options')
+                ->rows(array('value' => json_encode(\Typecho\Plugin::export())))
+                ->where('name = ?', 'plugins'));
         } catch (\Throwable $e) {
             $reloaded = false;
             error_log('[TeoSeo-Update] 插件重启失败: ' . $e->getMessage());
