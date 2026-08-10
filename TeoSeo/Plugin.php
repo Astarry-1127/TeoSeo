@@ -67,6 +67,13 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         // 前台输出 SEO meta(description / keywords / JSON-LD)
         \Typecho\Plugin::factory('Widget_Archive')->header = array(__CLASS__, 'outputHeaderMeta');
 
+        // GEO 优化钩子(meta/og 清理 + Breadcrumb + details 折叠块保护, 受 GEO 开关控制)。
+        // 必须在这里注册, 否则手动加到 options.plugins 的 GEO 钩子在重新激活/自动更新重建时会丢失。
+        \Typecho\Plugin::factory('Widget_Archive')->headerOptions = array(__CLASS__, 'cleanHeaderOptions');
+        \Typecho\Plugin::factory('Widget_Abstract_Contents')->excerpt = array(__CLASS__, 'cleanExcerpt');
+        \Typecho\Plugin::factory('Widget_Abstract_Contents')->markdown = array(__CLASS__, 'markdown');
+        \Typecho\Plugin::factory('Widget_Archive')->markdown = array(__CLASS__, 'markdown');
+
         // 创建推送日志表
         self::ensureLogTable();
 
