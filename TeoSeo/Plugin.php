@@ -79,7 +79,62 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         // 自动更新 action(/action/teoseo-update, TeoSeo_Update 由 autoload 加载 Update.php)
         \Utils\Helper::addAction('teoseo-update', 'TeoSeo_Update');
 
+        // 把钩子持久化到 DB: 自动更新后旧版 Update.php 只调 activate()(不写库),
+        // 这里确保新注册的钩子(含 GEO 的 headerOptions/excerpt/markdown)落库,
+        // 否则新版新增钩子不生效且 DB 残留旧 handles 会导致设置页 500。
+        self::persistHooks();
+
         return _t('TeoSeo 已激活: /sitemap.xml 已就绪, 发布文章将自动推送 IndexNow / 百度, 并自动生成 AI 摘要与关键词。');
+    }
+
+    /**
+     * 将当前已注册的 TeoSeo 钩子写回 options.plugins(保留其他插件的 handles)。
+     *
+     * 仅在 activate()/自动更新后调用。读库合并而非整表覆盖, 避免丢其他插件钩子。
+     *
+     * @return void
+     */
+    private static function persistHooks()
+    {
+        try {
+            \Typecho\Plugin::activate('TeoSeo');
+            $export = \Typecho\Plugin::export();
+            $db = \Typecho\Db::get();
+            $row = $db->fetchRow($db->select('value')->from('table.options')->where('name = ?', 'plugins'));
+            $existing = json_decode($row['value'], true);
+            if (!is_array($existing)) {
+                $existing = array('handles' => array(), 'activated' => array());
+            }
+            if (!isset($existing['handles']) || !is_array($existing['handles'])) {
+                $existing['handles'] = array();
+            }
+            if (!isset($existing['activated']) || !is_array($existing['activated'])) {
+                $existing['activated'] = array();
+            }
+            // 移除 DB 中旧的 TeoSeo 钩子
+            foreach ($existing['handles'] as $k => $v) {
+                if (is_array($v)) {
+                    foreach ($v as $cb) {
+                        if (isset($cb[0]) && 'TeoSeo_Plugin' === $cb[0]) {
+                            unset($existing['handles'][$k]);
+                            break;
+                        }
+                    }
+                }
+            }
+            // 合并本次注册的 TeoSeo 钩子
+            foreach ($export['handles'] as $k => $v) {
+                $existing['handles'][$k] = $v;
+            }
+            if (isset($export['activated']['TeoSeo'])) {
+                $existing['activated']['TeoSeo'] = $export['activated']['TeoSeo'];
+            }
+            $db->query($db->update('table.options')
+                ->rows(array('value' => json_encode($existing, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)))
+                ->where('name = ?', 'plugins'));
+        } catch (\Throwable $e) {
+            error_log('[TeoSeo] persistHooks failed: ' . $e->getMessage());
+        }
     }
 
     /**

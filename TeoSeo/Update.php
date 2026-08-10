@@ -247,7 +247,7 @@ class TeoSeo_Update extends \Typecho\Widget implements \Widget\ActionInterface
             @unlink($tmpZip);
             $this->out(false, '无法创建备份目录');
         }
-        $coreFiles = array('Plugin.php', 'Client.php', 'Widget.php', 'ai.php', 'logs.php');
+        $coreFiles = array('Plugin.php', 'Client.php', 'Update.php', 'Widget.php', 'ai.php', 'logs.php');
         $backedUp = 0;
         foreach ($coreFiles as $f) {
             if (file_exists($pluginDir . '/' . $f) && @copy($pluginDir . '/' . $f, $backupDir . '/' . $f)) {
