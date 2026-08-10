@@ -427,7 +427,7 @@ class GetSite
 
         // 获取 RSS 和 Sitemap 链接
         $rss_url = self::rssUrl();
-        $sitemap_url = Get::Assets('library/sitemap.php');
+        $sitemap_url = rtrim(Helper::options()->siteUrl, '/') . '/sitemap.xml'; // TeoSeo 插件生成的 sitemap
 
         // 构建脚本列表
         $scripts = [
