@@ -271,27 +271,25 @@ class TeoSeo_Update extends \Typecho\Widget implements \Widget\ActionInterface
             $this->out(false, '更新失败: 没有文件被覆盖(目标目录不可写?)');
         }
 
-        // 7. 重启插件(重建钩子)
-        // 正确升级法: 重置内存 + 清空 DB 注册表, 再重新 activate(注册路由/面板/钩子),
-        // 最后把 export() 写回 DB。否则只覆盖文件不重建钩子, 新版新增钩子(如 GEO 的
-        // headerOptions/excerpt/markdown)不会被注册, 且 DB 残留旧 handles 会导致设置页 500。
+        // 7. 写「待重建钩子」标记(不在此请求内重建)
+        // 更新在同一请求内, Plugin.php 类早已加载(旧版), 直接 activate() 用的是旧类钩子,
+        // 且旧逻辑会把 activated 清空导致设置页 500。改为写标记: 下一次任何请求加载新版
+        // Plugin.php 时(其文件顶层检测标记)自动用正确升级法重建钩子并清除标记。
         $reloaded = true;
         try {
             $db = \Typecho\Db::get();
-            \Typecho\Plugin::init(array('handles' => array(), 'activated' => array()));
-            $db->query($db->update('table.options')
-                ->rows(array('value' => json_encode(array('handles' => array(), 'activated' => array()))))
-                ->where('name = ?', 'plugins'));
-
-            \TeoSeo_Plugin::activate();
-            \Typecho\Plugin::activate('TeoSeo');
-
-            $db->query($db->update('table.options')
-                ->rows(array('value' => json_encode(\Typecho\Plugin::export())))
-                ->where('name = ?', 'plugins'));
+            $exists = $db->fetchRow($db->select('value')->from('table.options')
+                ->where('name = ?', 'teoseo_pending_reactivate'));
+            if ($exists) {
+                $db->query($db->update('table.options')->rows(array('value' => '1'))
+                    ->where('name = ?', 'teoseo_pending_reactivate'));
+            } else {
+                $db->query($db->insert('table.options')
+                    ->rows(array('name' => 'teoseo_pending_reactivate', 'user' => 0, 'value' => '1')));
+            }
         } catch (\Throwable $e) {
             $reloaded = false;
-            error_log('[TeoSeo-Update] 插件重启失败: ' . $e->getMessage());
+            error_log('[TeoSeo-Update] 写重建标记失败: ' . $e->getMessage());
         }
 
         $this->out(

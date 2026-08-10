@@ -1207,3 +1207,30 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         }
     }
 }
+
+// ===== 自动更新后「待重建钩子」标记检测(2026-08-10) =====
+// 自动更新只覆盖文件, 更新请求内用的是已加载的旧类, activate() 不会注册新版钩子。
+// Update.php 更新后会写 options 的 teoseo_pending_reactivate 标记;
+// 下一次任何请求加载本文件时(activated 含 TeoSeo 则前台/后台都会加载),
+// 检测到标记就按「正确升级法」重建钩子(重置内存+清库+重新activate+写回export), 并清除标记。
+if (defined('__TYPECHO_ROOT_DIR__') && 'cli' !== PHP_SAPI) {
+    try {
+        $db = \Typecho\Db::get();
+        $pending = $db->fetchRow($db->select('value')->from('table.options')
+            ->where('name = ?', 'teoseo_pending_reactivate'));
+        if ($pending && '1' === (string) $pending['value']) {
+            \Typecho\Plugin::init(array('handles' => array(), 'activated' => array()));
+            $db->query($db->update('table.options')
+                ->rows(array('value' => json_encode(array('handles' => array(), 'activated' => array()))))
+                ->where('name = ?', 'plugins'));
+            \TeoSeo_Plugin::activate();
+            \Typecho\Plugin::activate('TeoSeo');
+            $db->query($db->update('table.options')
+                ->rows(array('value' => json_encode(\Typecho\Plugin::export())))
+                ->where('name = ?', 'plugins'));
+            $db->query($db->delete('table.options')->where('name = ?', 'teoseo_pending_reactivate'));
+        }
+    } catch (\Throwable $e) {
+        error_log('[TeoSeo] pending reactivate failed: ' . $e->getMessage());
+    }
+}
