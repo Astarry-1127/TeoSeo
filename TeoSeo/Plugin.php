@@ -26,7 +26,7 @@ if (!interface_exists('Typecho_Plugin_Interface', false)) {
  *
  * @package TeoSeo
  * @author Astarry
- * @version 1.2.4
+ * @version 1.3.0
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
@@ -42,7 +42,10 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     const LOG_TABLE = 'seo_logs';
 
     /** 插件版本号(与文件头 @version 保持一致, 自动更新以此比较) */
-    const VERSION = '1.2.4';
+    const VERSION = '1.3.0';
+
+    /** GEO 适配反馈页面(作者博客, 供使用者反馈希望适配的主题) */
+    const GEO_FEEDBACK_URL = 'https://blog.astarry.cn/feedback/';
 
     /**
      * 插件激活
@@ -206,6 +209,56 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             _t('默认严格校验, 若虚拟主机 CA 链残缺导致请求失败, 勾选后会自动降级重试一次。')
         );
         $form->addInput($aiSkipVerifySSL);
+
+        /** GEO 优化配置 */
+        echo '<h3 style="margin:2em 0 0.8em; border-top:1px dashed #ddd; padding-top:1em;">GEO 优化</h3>';
+
+        $geoEnabled = new Typecho_Widget_Helper_Form_Element_Checkbox(
+            'geoEnabled', array('enable' => _t('启用 GEO 优化')),
+            array(),
+            _t('GEO 开关'),
+            _t('默认关闭, 手动开启后生效。面向生成式引擎(AI 搜索/引用)的优化: ① meta description / og:description 清理(无 markdown 污染, 优先 AI 摘要) ② 输出 BreadcrumbList 结构化数据 ③ 保护文章顶部「本文要点」<code>&lt;details&gt;</code> 折叠块不被解析器破坏。其中折叠块保护需配合 Inaline 主题补丁(见仓库 <code>inaline-patch/</code>), 其他主题可留言请求适配。')
+        );
+        $form->addInput($geoEnabled);
+
+        // GEO 主题适配检测: 非 Inaline 主题时, 勾选「启用 GEO 优化」弹窗提示适配范围
+        // (双按钮: 确定=关闭弹窗, 反馈=跳转作者博客反馈页)
+        $themeName = strtolower(trim((string) \Utils\Helper::options()->theme));
+        if ('inaline' !== $themeName) {
+            $feedbackUrl = self::GEO_FEEDBACK_URL;
+            echo '<style>'
+                . '#teoseoGeoModal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:none;align-items:center;justify-content:center}'
+                . '#teoseoGeoModal .box{background:#fff;border-radius:10px;max-width:440px;padding:24px 28px;box-shadow:0 10px 30px rgba(0,0,0,.2);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}'
+                . '#teoseoGeoModal .box h4{margin:0 0 8px;font-size:15px}'
+                . '#teoseoGeoModal .box p{margin:0;color:#555;font-size:13px;line-height:1.7}'
+                . '#teoseoGeoModal .btns{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}'
+                . '#teoseoGeoModal .btns a,#teoseoGeoModal .btns button{padding:8px 18px;border-radius:6px;text-decoration:none;font-size:13px;cursor:pointer;border:none}'
+                . '#teoseoGeoModal .btn-ok{background:#e5e7eb;color:#333}'
+                . '#teoseoGeoModal .btn-fb{background:#2563eb;color:#fff}'
+                . '</style>'
+                . '<div id="teoseoGeoModal"><div class="box">'
+                . '<h4>' . _t('GEO 优化主题适配提示') . '</h4>'
+                . '<p>' . _t('此功能目前仅适配 <strong>Inaline</strong> 主题。如果需要为您所使用的主题适配, 点击「反馈」前往作者博客留言, 作者会尽力适配。') . '</p>'
+                . '<div class="btns">'
+                . '<button type="button" class="btn-ok" onclick="window.__teoseoGeoDismiss&&window.__teoseoGeoDismiss()">' . _t('确定') . '</button>'
+                . '<a href="' . htmlspecialchars($feedbackUrl, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener" class="btn-fb">' . _t('反馈') . '</a>'
+                . '</div></div></div>'
+                . '<script>'
+                . '(function(){'
+                . 'var lastCb=null;'
+                . 'function isGeoCb(el){return el&&el.name&&el.name.indexOf("geoEnabled")===0;}'
+                . 'function show(cb){lastCb=cb;var m=document.getElementById("teoseoGeoModal");if(m)m.style.display="flex";}'
+                . 'function dismiss(){var m=document.getElementById("teoseoGeoModal");if(m)m.style.display="none";if(lastCb){lastCb.checked=false;}lastCb=null;}'
+                . 'window.__teoseoGeoDismiss=dismiss;'
+                . 'document.addEventListener("change",function(e){if(isGeoCb(e.target)&&e.target.checked)show(e.target);});'
+                . 'document.addEventListener("click",function(e){'
+                . 'if(isGeoCb(e.target)&&e.target.checked){show(e.target);return;}'
+                . 'if(e.target.classList&&e.target.classList.contains("btn-ok")){dismiss();}'
+                . 'if(e.target.classList&&e.target.classList.contains("btn-fb")){setTimeout(dismiss,0);}'
+                . '});'
+                . '})();'
+                . '</script>';
+        }
 
         echo '<p style="color:#999; font-size:13px; margin-top:1.5em;">'
             . _t('推送历史见左侧菜单: <strong>TeoSeo → 推送历史</strong>(最近 50 条推送结果); 存量文章 AI 生成见 <strong>TeoSeo → AI 内容优化</strong>。')
@@ -486,7 +539,10 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         }
 
         list($summary, $keywords) = TeoSeo_Client::generate($row['title'], $row['text'], $config);
-        if ('' === trim($summary)) {
+        // 生成结果入库前统一清理 markdown 痕迹, 保证字段/前台/主题三方一致
+        $summary  = self::cleanMetaText($summary);
+        $keywords = self::cleanMetaText($keywords);
+        if ('' === $summary) {
             self::logAi($row, false, 'AI 未返回有效摘要(请检查接口配置与余额)');
             return array(false, 'AI 未返回有效摘要, 请检查接口配置与余额');
         }
@@ -543,16 +599,16 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             // meta description: AI 摘要优先, 否则从正文截取
             // 主题(如 Inaline)可能已经输出过 description/keywords, 再输出一遍会重复,
             // 所以先看 $header 里有没有, 有就让主题的留下
-            $desc = $summary;
+            // AI 摘要和正文 fallback 都统一走 cleanMetaText 清 markdown 痕迹
+            // (AI 摘要有时带回 ## 等符号, 搜索引擎/AI 引擎看到会皱眉)
+            $desc = self::cleanMetaText($summary);
             if ('' === $desc) {
-                // 正文是 markdown, 去掉行首 # 和行内 ** / ` 等符号再截取,
-                // 不然 description 里全是 # 和星号, 搜索引擎看到会皱眉
-                $text = trim(strip_tags((string) $archive->text));
-                $text = preg_replace('/^#{1,6}\s*/m', '', $text);
-                $text = preg_replace('/[*_`>~]/', '', $text);
-                $desc = function_exists('mb_substr') ? mb_substr($text, 0, 120) : substr($text, 0, 120);
+                $desc = self::cleanMetaText((string) $archive->text);
             }
-            $desc = trim(preg_replace('/\s+/', ' ', $desc));
+            if ('' !== $desc) {
+                $desc = function_exists('mb_substr') ? mb_substr($desc, 0, 150) : substr($desc, 0, 150);
+            }
+            $keywords = self::cleanMetaText($keywords);
 
             if ('' !== $desc && false === stripos($header, 'name="description"')) {
                 echo '<meta name="description" content="' . htmlspecialchars($desc, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
@@ -594,9 +650,198 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             echo '<script type="application/ld+json">'
                 . json_encode($jsonLd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)
                 . '</script>' . "\n";
+
+            // BreadcrumbList 结构化数据: 帮助搜索引擎与 AI 引擎理解站点层级(GEO 开关控制)
+            if (self::geoEnabled()) {
+                $crumb = array(
+                    '@context'        => 'https://schema.org',
+                    '@type'           => 'BreadcrumbList',
+                    'itemListElement' => array(
+                        array(
+                            '@type'    => 'ListItem',
+                            'position' => 1,
+                            'name'     => '首页',
+                            'item'     => rtrim((string) $options->siteUrl, '/') . '/',
+                        ),
+                    ),
+                );
+                try {
+                    // 注意: $archive->categories 是重载属性, 不能对它用 reset()(引用语义会报
+                    // "Indirect modification of overloaded property") —— 先取副本再索引
+                    $cats = $archive->categories;
+                    if (is_array($cats) && count($cats) > 0) {
+                        $first = $cats[0];
+                        $catName = trim((string) (isset($first['name']) ? $first['name'] : ''));
+                        if ('' !== $catName) {
+                            $crumb['itemListElement'][] = array(
+                                '@type'    => 'ListItem',
+                                'position' => 2,
+                                'name'     => $catName,
+                            );
+                        }
+                    }
+                } catch (\Throwable $e) {
+                }
+                $crumb['itemListElement'][] = array(
+                    '@type'    => 'ListItem',
+                    'position' => count($crumb['itemListElement']) + 1,
+                    'name'     => trim((string) $archive->title),
+                    'item'     => (string) $archive->permalink,
+                );
+                echo '<script type="application/ld+json">'
+                    . json_encode($crumb, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP)
+                    . '</script>' . "\n";
+            }
         } catch (\Throwable $e) {
             error_log('[TeoSeo-AI] outputHeaderMeta failed: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * 清理文本中的 Markdown 痕迹, 用于 meta description / 摘要 / 关键词输出
+     *
+     * 去掉行首 # 标题、引用/列表符号、行内强调/代码/删除线符号、
+     * markdown 链接转纯文本、折叠空白。AI 生成的摘要与正文 fallback 都走这里。
+     *
+     * @param string $text 原文
+     * @return string 清理后的单行文本
+     */
+    private static function cleanMetaText(string $text): string
+    {
+        $text = trim(strip_tags($text));
+        if ('' === $text) {
+            return '';
+        }
+        $text = preg_replace('/^#{1,6}\s*/m', '', $text);            // 行首 # 标题
+        $text = preg_replace('/^[>\-\*\+]\s+/m', '', $text);         // 引用 / 无序列表符号
+        $text = preg_replace('/\[\s*\]\([^)]*\)/', '', $text);       // 空链接(图片占位)
+        $text = preg_replace('/\[([^\]]+)\]\([^)]*\)/', '$1', $text); // markdown 链接 → 纯文本
+        $text = preg_replace('/[*_`~>|]/', '', $text);               // 行内强调 / 代码 / 表格符
+        $text = preg_replace('/\s+/', ' ', $text);                   // 折叠空白为单空格
+        return trim($text);
+    }
+
+    /**
+     * headerOptions filter: Typecho 核心输出 meta 前替换为干净版 description/keywords
+     *
+     * Typecho 核心对无自定义字段的文章会从 markdown 正文截取 description
+     * (会带 ## 等符号, 详见 Widget_Archive::header() 的 $allows 组装)。
+     * 这里在输出前统一换成 AI 摘要或清理后的正文, 同时保留 AI 关键词。
+     * 钩子方式: Widget_Archive::headerOptions filter(在 echo 前执行)。
+     */
+    public static function cleanHeaderOptions(array $allows, $archive): array
+    {
+        try {
+            if (!self::geoEnabled()) {
+                return $allows;
+            }
+            if (!($archive instanceof \Widget\Archive) || (!$archive->is('post') && !$archive->is('page'))) {
+                return $allows;
+            }
+
+            $summary  = '';
+            $keywords = '';
+            try {
+                $db  = \Typecho\Db::get();
+                $fds = $db->fetchAll($db->select('name', 'str_value')->from('table.fields')
+                    ->where('cid = ?', $archive->cid));
+                foreach ($fds as $f) {
+                    if ('teoseo_ai_summary' === $f['name']) {
+                        $summary = trim((string) $f['str_value']);
+                    } elseif ('teoseo_ai_keywords' === $f['name']) {
+                        $keywords = trim((string) $f['str_value']);
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+
+            $desc = self::cleanMetaText($summary);
+            if ('' === $desc) {
+                $desc = self::cleanMetaText((string) $archive->text);
+            }
+            if ('' !== $desc) {
+                $desc = function_exists('mb_substr') ? mb_substr($desc, 0, 150) : substr($desc, 0, 150);
+                $allows['description'] = $desc;
+            }
+            if ('' !== $keywords) {
+                $allows['keywords'] = $keywords;
+            }
+        } catch (\Throwable $e) {
+        }
+        return $allows;
+    }
+
+    /**
+     * excerpt filter: 让 Typecho 核心的摘录(archiveDescription / og:description /
+     * 列表摘要)使用干净文本, 而不是带 markdown 符号的正文截取。
+     *
+     * 挂载点: Widget\Base\Contents 的 `excerpt` filter
+     * (___excerpt() 里 Contents::pluginHandle()->filter('excerpt', ...))。
+     * Typecho 核心在 single 页把 $this->plainExcerpt(= 从 excerpt 剥 HTML)赋给
+     * archiveDescription, 进而被 name=description 与 og/twitter:description 使用;
+     * 返回 AI 摘要(或清理后的正文), 从源头消灭 markdown 污染。
+     */
+    public static function cleanExcerpt($excerpt, $contents)
+    {
+        try {
+            if (!self::geoEnabled()) {
+                return $excerpt;
+            }
+            $cid = (isset($contents->cid) && $contents->cid) ? intval($contents->cid) : 0;
+            if ($cid > 0) {
+                $summary = self::getAiField($cid, 'teoseo_ai_summary');
+                if ($summary) {
+                    return self::cleanMetaText($summary);
+                }
+            }
+            return self::cleanMetaText($excerpt);
+        } catch (\Throwable $e) {
+            return $excerpt;
+        }
+    }
+
+    /**
+     * markdown filter: 保护 <details> 折叠块不被 Parsedown 破坏
+     *
+     * Parsedown 不把 <details> 当块级 HTML, 会在其内部插入 <br>/</p>,
+     * 导致 <summary> 不再是 <details> 的第一个子元素, 折叠功能与
+     * details 样式全部失效(实测 2026-08-10)。
+     * 处理方式: 渲染前用占位符替换 details 块, 内置 Markdown::convert
+     * 渲染后再恢复原样。无 details 时返回 null, 交回内置解析。
+     */
+    public static function markdown(?string $text): ?string
+    {
+        if (!self::geoEnabled()) {
+            return null;
+        }
+        if (null === $text || false === strpos($text, '<details')) {
+            return null;
+        }
+
+        $map = array();
+        $protected = preg_replace_callback(
+            '/<details>\s*<summary>(.*?)<\/summary>([\s\S]*?)<\/details>/i',
+            function ($m) use (&$map) {
+                $k = '%%TEOSEODETAIL' . count($map) . '%%';
+                $map[$k] = $m[0];
+                return $k;
+            },
+            $text
+        );
+
+        $html = \Utils\Markdown::convert($protected);
+
+        // 恢复占位符(移除可能被段落包裹的 <p>)
+        $html = preg_replace_callback(
+            '@<p>%%TEOSEODETAIL(\d+)%%</p>@',
+            function ($m) use (&$map) {
+                return $map['%%TEOSEODETAIL' . $m[1] . '%%'];
+            },
+            $html
+        );
+        $html = str_replace(array_keys($map), array_values($map), $html);
+
+        return $html;
     }
 
     /**
@@ -609,6 +854,22 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         } catch (\Throwable $e) {
             return NULL;
         }
+    }
+
+    /**
+     * GEO 优化是否启用(设置页「GEO 开关」)
+     *
+     * 默认关闭, 需用户手动开启; 开启后非 Inaline 主题会在设置页弹窗提示适配范围。
+     *
+     * @return bool
+     */
+    private static function geoEnabled(): bool
+    {
+        $config = self::readConfig();
+        if (NULL === $config || !isset($config->geoEnabled)) {
+            return false;
+        }
+        return is_array($config->geoEnabled) && in_array('enable', $config->geoEnabled);
     }
 
     /**
