@@ -70,11 +70,54 @@
 - BreadcrumbList 结构化数据（首页 > 分类 > 文章）
 - 「本文要点」折叠块保护：文章顶部 `<details>` 折叠块（默认折叠、点击展开），让 AI 引擎直接读到结论先行内容
 
-其中**「本文要点」折叠块的渲染保护依赖主题的正文渲染方式**：
+### 「本文要点」折叠块怎么用
 
-- **当前适配主题：Inaline**。需同时应用 [`inaline-patch/`](inaline-patch/README.md) 中的主题补丁（`Article.php` / `MarkdownParser.php` / `markdown.css` / `Site.php` 四个文件）
-- 使用**其他主题**时：插件其余功能（sitemap / 推送 / AI 摘要 / meta 清理 / JSON-LD）不受影响，但「本文要点」折叠块可能无法正常渲染（Typecho 默认 markdown 解析器不识别 `<details>` 为块级元素，会被插入 `<br>/</p>` 破坏结构）
-- **需要适配其他主题**：请在 [GitHub Issues](https://github.com/Astarry-1127/TeoSeo/issues) 留言，或到[博客](https://blog.astarry.cn)留言，会尽力适配
+> 注意：折叠块是**写作时手动写进文章 markdown 源码**的一部分，插件不会自动生成，它只负责在渲染时保护折叠块不被破坏。
+
+1. 在文章的 markdown 源码**最顶部**（第一个正文标题之前）粘贴：
+
+```html
+<details><summary>本文要点</summary>
+<ul>
+<li>要点一：一句话写清这个核心结论</li>
+<li>要点二：第二个关键点</li>
+<li>要点三：依次列出 3~5 条</li>
+</ul>
+</details>
+```
+
+2. 把 `<li>` 换成你文章的 3~5 条核心要点（简短的一句话结论，AI 引擎会直接读这段作摘要来源）
+3. 正文从折叠块下方开始正常写（`## 标题`、段落、代码块等）
+
+**格式要求**：
+
+- 必须严格用 `<details><summary>本文要点</summary>` 开头、`</details>` 结尾（大小写不限，`summary` 必须是 `<details>` 的第一个子元素，否则 css / 折叠失效）
+- 折叠块内部是 **HTML，不渲染 markdown**：命令用 `<code>xxx</code>`、加粗用 `<strong>xxx</strong>`、链接用 `<a href="...">文字</a>`
+- 一条要点一个 `<li>`，不要手写序号（样式会自动编号）
+
+一份完整示例：
+
+```
+<details><summary>本文要点</summary>
+<ul>
+<li><strong>XXX</strong>：用一句话说清本文核心结论</li>
+<li>命令是 <code>xxx</code>，作用在 <code>yyy</code></li>
+<li>第三步 <a href="https://blog.astarry.cn">去博客看完整效果</a></li>
+</ul>
+</details>
+
+## 正文从这里开始
+```
+
+> 折叠块在页面源码中是真实存在的 HTML（默认折叠），人类阅读时点击展开，搜索引擎与 AI 引擎爬虫可直接读取——这就是 GEO 意义所在。
+
+### 主题适配
+
+「本文要点」折叠块能否**保持结构不坏**，依赖主题的正文渲染方式（Typecho 默认 markdown 解析器不把 `<details>` 当块级元素，会往里插 `<br>/</p>`）：
+
+- **PureSuck**（推荐）：正文走 Typecho 标准 markdown filter，插件 GEO 钩子自动保护折叠块，**无需主题补丁**。已在 Typecho 1.3 + PureSuck 实测通过
+- **Inaline**：需同时应用 [`inaline-patch/`](inaline-patch/README.md) 中的主题补丁（`Article.php` / `MarkdownParser.php` / `markdown.css` / `Site.php` 四个文件）
+- **其他主题**：插件其余功能（sitemap / 推送 / AI 摘要 / meta 清理 / JSON-LD）不受影响；折叠块若被破坏，请在 [GitHub Issues](https://github.com/Astarry-1127/TeoSeo/issues) 留言，或到[博客](https://blog.astarry.cn)留言，会尽力适配
 
 ---
 
@@ -90,7 +133,7 @@
 1. 后台停用并删除 `usr/plugins/TeoSeo` 目录
 2. 下载 v1.3.0，上传全新 `TeoSeo/` 目录
 3. 后台重新启用，重新填写配置
-4. 如需 GEO 优化，同时应用 `inaline-patch/` 主题补丁
+4. 如需 GEO 优化：PureSuck 主题开 GEO 开关即可；Inaline 主题同时应用 `inaline-patch/` 主题补丁
 
 > **v1.3.0 之后的版本间更新**（如 v1.3.0 → v1.3.1）自动更新完整工作：更新后自动重建钩子，无需手动。
 
