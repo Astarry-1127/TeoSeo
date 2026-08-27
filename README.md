@@ -113,11 +113,11 @@
 
 ### 主题适配
 
-「本文要点」折叠块能否**保持结构不坏**，依赖主题的正文渲染方式（Typecho 默认 markdown 解析器不把 `<details>` 当块级元素，会往里插 `<br>/</p>`）：
+「本文要点」折叠块能否**保持结构不坏**，取决于主题的正文渲染方式。插件通过 Typecho 的 `markdown` filter 自动保护折叠块，因此：
 
-- **PureSuck**（推荐）：正文走 Typecho 标准 markdown filter，插件 GEO 钩子自动保护折叠块，**无需主题补丁**。已在 Typecho 1.3 + PureSuck 实测通过
-- **Inaline**：需同时应用 [`inaline-patch/`](inaline-patch/README.md) 中的主题补丁（`Article.php` / `MarkdownParser.php` / `markdown.css` / `Site.php` 四个文件）
-- **其他主题**：插件其余功能（sitemap / 推送 / AI 摘要 / meta 清理 / JSON-LD）不受影响；折叠块若被破坏，请在 [GitHub Issues](https://github.com/Astarry-1127/TeoSeo/issues) 留言，或到[博客](https://blog.astarry.cn)留言，会尽力适配
+- **正文走 Typecho 标准 markdown filter 的主题**（如 **PureSuck**）：插件自动保护折叠块，**无需任何主题补丁**，装好插件开 GEO 开关即可使用
+- **正文自行解析 markdown、绕过 Typecho filter 的主题**（如 **Inaline**）：折叠块保护需配合 [`inaline-patch/`](inaline-patch/README.md) 中的主题补丁（`Article.php` / `MarkdownParser.php` / `markdown.css` / `Site.php` 四个文件）
+- **其他主题**：插件其余功能（sitemap / 推送 / AI 摘要 / meta 清理 / JSON-LD）全部不受影响。折叠块若无法正常渲染，请在 [GitHub Issues](https://github.com/Astarry-1127/TeoSeo/issues) 留言，或到[博客](https://blog.astarry.cn)留言，会尽力适配
 
 ---
 
@@ -141,7 +141,7 @@
 
 ## 版本历史
 
-- **v1.3.2**（2026-08-27）：修复主题多次调用 `$this->header()`（如 PureSuck 在评论区 `$this->header('description=0&...')`）导致 GEO meta / JSON-LD 重复输出的问题（`outputHeaderMeta` / `cleanHeaderOptions` 请求级去重）；PureSuck 主题 GEO 适配验证通过（details 折叠块保护 + meta 清理均自动生效，无需主题补丁）
+- **v1.3.2**（2026-08-27）：修复同一请求内 `Widget_Archive::header` 被多次调用时（如主题在别处再次输出 head 相关标签），GEO meta / keywords / JSON-LD 会重复输出的问题（`outputHeaderMeta` / `cleanHeaderOptions` 增加请求级去重，整页只输出一份）；PureSuck 主题 GEO 适配验证通过（details 折叠块保护 + meta 清理均自动生效，无需主题补丁）
 - **v1.3.1**（2026-08-27）：修复「个人设置」页 500（移除多余的空 `personalConfig()`，Typecho 后台遍历启用插件个人配置时不再因缺失 `_plugin:TeoSeo` 抛异常）；AI 面板 JSON 响应纯净化（清空输出缓冲 + `json_encode` 失败兜底，杜绝前端 "Unexpected token '<'")
 - **v1.3.0**（2026-08-10）：GEO 优化（meta/og 清理 + Breadcrumb JSON-LD + details 折叠块保护）、GEO 开关、主题适配检测弹窗、Inaline 适配补丁、自动更新钩子重建修复
 - **v1.2.x**：AI 内容优化（摘要 / 关键词）、推送历史面板、自动更新、密钥脱敏
