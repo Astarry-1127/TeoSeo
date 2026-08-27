@@ -47,6 +47,9 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     /** GEO 适配反馈页面(作者博客, 供使用者反馈希望适配的主题) */
     const GEO_FEEDBACK_URL = 'https://blog.astarry.cn/feedback/';
 
+    /** GEO 已适配主题(小写目录名) */
+    const GEO_ADAPTED_THEMES = array('inaline', 'puresuck');
+
     /**
      * 插件激活
      *
@@ -310,14 +313,14 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             'geoEnabled', array('enable' => _t('启用 GEO 优化')),
             array(),
             _t('GEO 开关'),
-            _t('默认关闭, 手动开启后生效。面向生成式引擎(AI 搜索/引用)的优化: ① meta description / og:description 清理(无 markdown 污染, 优先 AI 摘要) ② 输出 BreadcrumbList 结构化数据 ③ 保护文章顶部「本文要点」<code>&lt;details&gt;</code> 折叠块不被解析器破坏。其中折叠块保护需配合 Inaline 主题补丁(见仓库 <code>inaline-patch/</code>), 其他主题可留言请求适配。')
+            _t('默认关闭, 手动开启后生效。面向生成式引擎(AI 搜索/引用)的优化: ① meta description / og:description 清理(无 markdown 污染, 优先 AI 摘要) ② 输出 BreadcrumbList 结构化数据 ③ 保护文章顶部「本文要点」<code>&lt;details&gt;</code> 折叠块不被解析器破坏。已适配主题: Inaline、PureSuck(免补丁); 其他主题可留言请求适配。')
         );
         $form->addInput($geoEnabled);
 
-        // GEO 主题适配检测: 非 Inaline 主题时, 勾选「启用 GEO 优化」弹窗提示适配范围
+        // GEO 主题适配检测: 仅对未适配主题弹窗提示(已适配主题无感), 勾选「启用 GEO 优化」时提示适配范围
         // (双按钮: 确定=关闭弹窗, 反馈=跳转作者博客反馈页)
         $themeName = strtolower(trim((string) \Utils\Helper::options()->theme));
-        if ('inaline' !== $themeName) {
+        if (!in_array($themeName, self::GEO_ADAPTED_THEMES, true)) {
             $feedbackUrl = self::GEO_FEEDBACK_URL;
             echo '<style>'
                 . '#teoseoGeoModal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:none;align-items:center;justify-content:center}'
@@ -331,7 +334,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
                 . '</style>'
                 . '<div id="teoseoGeoModal"><div class="box">'
                 . '<h4>' . _t('GEO 优化主题适配提示') . '</h4>'
-                . '<p>' . _t('此功能目前仅适配 <strong>Inaline</strong> 主题。如果需要为您所使用的主题适配, 点击「反馈」前往作者博客留言, 作者会尽力适配。') . '</p>'
+                . '<p>' . _t('当前使用的主题可能未适配 GEO 折叠块保护(已适配: Inaline、PureSuck)。如需适配, 点击「反馈」前往作者博客留言, 作者会尽力适配; 已适配主题忽略本提示即可。') . '</p>'
                 . '<div class="btns">'
                 . '<button type="button" class="btn-ok" onclick="window.__teoseoGeoDismiss&&window.__teoseoGeoDismiss()">' . _t('确定') . '</button>'
                 . '<a href="' . htmlspecialchars($feedbackUrl, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener" class="btn-fb">' . _t('反馈') . '</a>'
