@@ -26,7 +26,7 @@ if (!interface_exists('Typecho_Plugin_Interface', false)) {
  *
  * @package TeoSeo
  * @author Astarry
- * @version 1.3.1
+ * @version 1.3.2
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
@@ -42,7 +42,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     const LOG_TABLE = 'seo_logs';
 
     /** 插件版本号(与文件头 @version 保持一致, 自动更新以此比较) */
-    const VERSION = '1.3.1';
+    const VERSION = '1.3.2';
 
     /** GEO 适配反馈页面(作者博客, 供使用者反馈希望适配的主题) */
     const GEO_FEEDBACK_URL = 'https://blog.astarry.cn/feedback/';
@@ -630,6 +630,15 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
                 return;
             }
 
+            // 请求级去重: 部分主题(如 PureSuck)会在评论区用 $this->header('description=0&...')
+            // 二次调用 header(), Typecho 核心会按 rule 抑制 meta, 但插件钩子不能跟着重复输出,
+            // 否则整页 meta/JSON-LD 会输出两份。这里标记本请求只输出一次。
+            static $geoDone = false;
+            if ($geoDone) {
+                return;
+            }
+            $geoDone = true;
+
             // 直接读字段表, 不依赖 fields 对象(兼容性最好)
             $summary  = '';
             $keywords = '';
@@ -790,6 +799,14 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             if (!($archive instanceof \Widget\Archive) || (!$archive->is('post') && !$archive->is('page'))) {
                 return $allows;
             }
+
+            // 请求级去重: 防止主题在评论区用 $this->header('description=0&...') 二次触发时,
+            // 把核心按 rule 抑制住的 description 又替换顶回来(与 outputHeaderMeta 互为呼应).
+            static $geoCleanDone = false;
+            if ($geoCleanDone) {
+                return $allows;
+            }
+            $geoCleanDone = true;
 
             $summary  = '';
             $keywords = '';

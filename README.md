@@ -98,6 +98,7 @@
 
 ## 版本历史
 
+- **v1.3.2**（2026-08-27）：修复主题多次调用 `$this->header()`（如 PureSuck 在评论区 `$this->header('description=0&...')`）导致 GEO meta / JSON-LD 重复输出的问题（`outputHeaderMeta` / `cleanHeaderOptions` 请求级去重）；PureSuck 主题 GEO 适配验证通过（details 折叠块保护 + meta 清理均自动生效，无需主题补丁）
 - **v1.3.1**（2026-08-27）：修复「个人设置」页 500（移除多余的空 `personalConfig()`，Typecho 后台遍历启用插件个人配置时不再因缺失 `_plugin:TeoSeo` 抛异常）；AI 面板 JSON 响应纯净化（清空输出缓冲 + `json_encode` 失败兜底，杜绝前端 "Unexpected token '<'")
 - **v1.3.0**（2026-08-10）：GEO 优化（meta/og 清理 + Breadcrumb JSON-LD + details 折叠块保护）、GEO 开关、主题适配检测弹窗、Inaline 适配补丁、自动更新钩子重建修复
 - **v1.2.x**：AI 内容优化（摘要 / 关键词）、推送历史面板、自动更新、密钥脱敏
