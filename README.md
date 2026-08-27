@@ -14,7 +14,6 @@
 - [配置说明](#配置说明)
 - [GEO 优化与主题适配](#geo-优化与主题适配)
 - [升级说明](#升级说明)
-- [版本历史](#版本历史)
 
 ---
 
@@ -136,16 +135,6 @@
 4. 如需 GEO 优化：PureSuck 主题开 GEO 开关即可；Inaline 主题同时应用 `inaline-patch/` 主题补丁
 
 > **v1.3.0 之后的版本间更新**（如 v1.3.0 → v1.3.1）自动更新完整工作：更新后自动重建钩子，无需手动。
-
----
-
-## 版本历史
-
-- **v1.3.3**（2026-08-27）：修复全新安装后「启用插件」报 500（Typecho 1.3 的 `Widget\Plugins\Edit::activate()` 启用插件时无条件调用 `personalConfig()`，v1.3.1/v1.3.2 移除该方法导致 `call_user_func` 抛错）；恢复空 `personalConfig()` 并在激活时写入 `_plugin:TeoSeo` 占位配置，同时解决个人设置页 500
-- **v1.3.2**（2026-08-27）：修复同一请求内 `Widget_Archive::header` 被多次调用时（如主题在别处再次输出 head 相关标签），GEO meta / keywords / JSON-LD 会重复输出的问题（`outputHeaderMeta` / `cleanHeaderOptions` 增加请求级去重，整页只输出一份）；PureSuck 主题 GEO 适配验证通过（details 折叠块保护 + meta 清理均自动生效，无需主题补丁）
-- **v1.3.1**（2026-08-27）：修复「个人设置」页 500（移除多余的空 `personalConfig()`，Typecho 后台遍历启用插件个人配置时不再因缺失 `_plugin:TeoSeo` 抛异常）；AI 面板 JSON 响应纯净化（清空输出缓冲 + `json_encode` 失败兜底，杜绝前端 "Unexpected token '<'")
-- **v1.3.0**（2026-08-10）：GEO 优化（meta/og 清理 + Breadcrumb JSON-LD + details 折叠块保护）、GEO 开关、主题适配检测弹窗、Inaline 适配补丁、自动更新钩子重建修复
-- **v1.2.x**：AI 内容优化（摘要 / 关键词）、推送历史面板、自动更新、密钥脱敏
 
 ---
 
