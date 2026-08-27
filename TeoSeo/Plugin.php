@@ -26,7 +26,7 @@ if (!interface_exists('Typecho_Plugin_Interface', false)) {
  *
  * @package TeoSeo
  * @author Astarry
- * @version 1.3.3
+ * @version 1.3.4
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
@@ -42,7 +42,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     const LOG_TABLE = 'seo_logs';
 
     /** 插件版本号(与文件头 @version 保持一致, 自动更新以此比较) */
-    const VERSION = '1.3.3';
+    const VERSION = '1.3.4';
 
     /** GEO 适配反馈页面(作者博客, 供使用者反馈希望适配的主题) */
     const GEO_FEEDBACK_URL = 'https://blog.astarry.cn/feedback/';
@@ -927,15 +927,18 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
      * 导致 <summary> 不再是 <details> 的第一个子元素, 折叠功能与
      * details 样式全部失效(实测 2026-08-10)。
      * 处理方式: 渲染前用占位符替换 details 块, 内置 Markdown::convert
-     * 渲染后再恢复原样。无 details 时返回 null, 交回内置解析。
+     * 渲染后再恢复原样。
+     * 注意: 不接管时不能返回 null, 而应返回内置转换结果 —— Typecho 1.3
+     * Contents::markdown() 里 `trigger($parsed)->filter('markdown', $text)`
+     * 只要有插件注册了 markdown 钩子, $parsed 即为 true, 不再调用内置
+     * Markdown::convert, 会直接把钩子返回值(null)赋给 $this->content,
+     * 导致正文丢失 & ___excerpt() 的 explode('<!--more-->', null) 触发
+     * PHP 8.1 Deprecated(实测 2026-08-27)。
      */
     public static function markdown(?string $text): ?string
     {
-        if (!self::geoEnabled()) {
-            return null;
-        }
-        if (null === $text || false === strpos($text, '<details')) {
-            return null;
+        if (!self::geoEnabled() || null === $text || false === strpos($text, '<details')) {
+            return \Utils\Markdown::convert($text);
         }
 
         $map = array();
