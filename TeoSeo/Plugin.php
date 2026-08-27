@@ -26,7 +26,7 @@ if (!interface_exists('Typecho_Plugin_Interface', false)) {
  *
  * @package TeoSeo
  * @author Astarry
- * @version 1.3.2
+ * @version 1.3.3
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
@@ -42,7 +42,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     const LOG_TABLE = 'seo_logs';
 
     /** 插件版本号(与文件头 @version 保持一致, 自动更新以此比较) */
-    const VERSION = '1.3.2';
+    const VERSION = '1.3.3';
 
     /** GEO 适配反馈页面(作者博客, 供使用者反馈希望适配的主题) */
     const GEO_FEEDBACK_URL = 'https://blog.astarry.cn/feedback/';
@@ -91,7 +91,38 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         // 否则新版新增钩子不生效且 DB 残留旧 handles 会导致设置页 500。
         self::persistHooks();
 
+        // 写入个人配置占位(_plugin:TeoSeo): Typecho 1.3 个人设置页会为声明了
+        // personalConfig 的插件读取 _plugin:XXX 配置, 缺失会抛 500(见 personalConfig 注释)。
+        self::ensurePersonalPluginOption();
+
         return _t('TeoSeo 已激活: /sitemap.xml 已就绪, 发布文章将自动推送 IndexNow / 百度, 并自动生成 AI 摘要与关键词。');
+    }
+
+    /**
+     * 确保 options 表存在 _plugin:TeoSeo(个人插件配置占位)。
+     *
+     * Typecho 1.3 的 Widget\Users\Profile::personalForm() 会调用
+     * Options::personalPlugin('TeoSeo') 读取 _plugin:TeoSeo, 缺失即抛
+     * Typecho\Plugin\Exception(个人设置页 500)。插件本身无个人设置,
+     * 这里写入空配置占位即可让读取成功。
+     *
+     * @return void
+     */
+    private static function ensurePersonalPluginOption()
+    {
+        try {
+            $db = \Typecho\Db::get();
+            $exists = $db->fetchRow($db->select('value')->from('table.options')
+                ->where('name = ?', '_plugin:TeoSeo'));
+            if (!$exists) {
+                // 注意值不能是空串: Options::personalPlugin 用 !empty() 判断,
+                // 空串会被当成"没有配置"继续抛 500。写合法 JSON 对象占位即可。
+                $db->query($db->insert('table.options')
+                    ->rows(array('name' => '_plugin:TeoSeo', 'user' => 0, 'value' => '{}')));
+            }
+        } catch (\Throwable $e) {
+            error_log('[TeoSeo] ensurePersonalPluginOption failed: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -386,6 +417,23 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",moveBlock);}else{window.setTimeout(moveBlock,0);}'
             . '})();'
             . '</script>';
+    }
+
+    /**
+     * 个人配置(未使用, 但方法必须存在)
+     *
+     * 注意: 不要删除本方法! Typecho 1.3 的 Widget\Plugins\Edit::activate()
+     * 在启用插件时会无条件 call_user_func([$className, 'personalConfig'], $form),
+     * 方法缺失会让"启用插件"直接 500(实测 2026-08-27)。同理
+     * Widget\Users\Profile::personalFormList() 会在"个人设置页"遍历带有
+     * personalConfig 的插件并读取 _plugin:XXX 配置 —— 所以 activate() 里
+     * 必须同步写入 _plugin:TeoSeo 配置, 否则个人设置页仍会 500。
+     *
+     * @param Typecho_Widget_Helper_Form $form
+     */
+    public static function personalConfig(Typecho_Widget_Helper_Form $form)
+    {
+        return; // 无个人设置
     }
 
     /**
