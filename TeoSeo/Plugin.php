@@ -26,7 +26,7 @@ if (!interface_exists('Typecho_Plugin_Interface', false)) {
  *
  * @package TeoSeo
  * @author Astarry
- * @version 1.3.0
+ * @version 1.3.1
  * @link https://blog.astarry.cn
  * @license GNU General Public License 2.0
  */
@@ -42,7 +42,7 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     const LOG_TABLE = 'seo_logs';
 
     /** 插件版本号(与文件头 @version 保持一致, 自动更新以此比较) */
-    const VERSION = '1.3.0';
+    const VERSION = '1.3.1';
 
     /** GEO 适配反馈页面(作者博客, 供使用者反馈希望适配的主题) */
     const GEO_FEEDBACK_URL = 'https://blog.astarry.cn/feedback/';
@@ -386,16 +386,6 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",moveBlock);}else{window.setTimeout(moveBlock,0);}'
             . '})();'
             . '</script>';
-    }
-
-    /**
-     * 个人配置(未使用)
-     *
-     * @param Typecho_Widget_Helper_Form $form
-     */
-    public static function personalConfig(Typecho_Widget_Helper_Form $form)
-    {
-        return; // 个人配置暂未使用(保持方法体非空, 便于插件信息解析)
     }
 
     /**

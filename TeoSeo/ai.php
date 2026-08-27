@@ -23,11 +23,27 @@ $msg       = NULL;
 // ===== AJAX 生成入口(单篇 / 批量共用, 返回 JSON) =====
 // 放最前面: 批量参数 batch=1 以前是 302 续跑, 现在批量逻辑整体搬到 JS 循环里
 if (isset($_GET['ajax']) && '1' === (string) $_GET['ajax']) {
-    header('Content-Type: application/json; charset=utf-8');
+    // 统一 JSON 出口: 清掉已产生的输出缓冲(虚拟主机的 security/display_errors
+    // 混入文本会破坏 JSON, 前端 r.json() 报 Unexpected token '<' 等);
+    // json_encode 失败(如摘要含非法 UTF-8 字节)时兜底为可读错误, 保证永远是合法 JSON。
+    $jsonOut = function (array $data) {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP);
+        if (false === $json) {
+            $data = array('ok' => false, 'msg' => '生成内容包含无法编码的字节, 已中止(多为文章正文含异常字符), 建议该篇改用强制覆盖重试');
+            $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP);
+        }
+        header('Content-Type: application/json; charset=utf-8');
+        echo $json;
+        exit;
+    };
+
     try {
+        $security = \Typecho\Widget::widget('Widget_Security');
         if (!isset($_GET['_']) || $_GET['_'] !== $security->getToken($tokenName)) {
-            echo json_encode(array('ok' => false, 'msg' => '校验失败, 请刷新页面重试'));
-            exit;
+            $jsonOut(array('ok' => false, 'msg' => '校验失败, 请刷新页面重试'));
         }
 
         $db     = \Typecho\Db::get();
@@ -42,23 +58,19 @@ if (isset($_GET['ajax']) && '1' === (string) $_GET['ajax']) {
                  ORDER BY c.cid ASC LIMIT 1"
             ));
             if (!$row) {
-                echo json_encode(array('ok' => true, 'done' => true, 'msg' => '批量生成完成'));
-                exit;
+                $jsonOut(array('ok' => true, 'done' => true, 'msg' => '批量生成完成'));
             }
             $r = TeoSeo_Plugin::applyAiToCid(intval($row['cid']), false);
-            echo json_encode(array('ok' => $r[0], 'done' => false, 'msg' => $r[1]));
-            exit;
+            $jsonOut(array('ok' => $r[0], 'done' => false, 'msg' => $r[1]));
         }
 
         // 单篇
         $cid   = max(0, intval(isset($_GET['cid']) ? $_GET['cid'] : 0));
         $force = isset($_GET['force']);
         $r     = TeoSeo_Plugin::applyAiToCid($cid, $force);
-        echo json_encode(array('ok' => $r[0], 'msg' => $r[1]));
-        exit;
+        $jsonOut(array('ok' => $r[0], 'msg' => $r[1]));
     } catch (\Throwable $e) {
-        echo json_encode(array('ok' => false, 'msg' => '生成异常: ' . $e->getMessage()));
-        exit;
+        $jsonOut(array('ok' => false, 'msg' => '生成异常: ' . $e->getMessage()));
     }
 }
 
