@@ -162,6 +162,31 @@ class TeoSeo_Update extends \Typecho\Widget implements \Widget\ActionInterface
     }
 
     /**
+     * 递归复制目录(dst 不存在则创建; 复制的文件数累加到 $count)
+     */
+    private function rcopy(string $src, string $dst, int &$count = 0)
+    {
+        if (!is_dir($src)) {
+            return;
+        }
+        if (!is_dir($dst)) {
+            @mkdir($dst, 0755, true);
+        }
+        foreach (scandir($src) as $item) {
+            if ('.' === $item || '..' === $item) {
+                continue;
+            }
+            $s = $src . '/' . $item;
+            $d = $dst . '/' . $item;
+            if (is_dir($s)) {
+                $this->rcopy($s, $d, $count);
+            } elseif (@copy($s, $d)) {
+                $count++;
+            }
+        }
+    }
+
+    /**
      * 检查更新
      */
     private function handleCheck()
@@ -239,7 +264,8 @@ class TeoSeo_Update extends \Typecho\Widget implements \Widget\ActionInterface
             $this->out(false, '更新包结构异常, 未找到 TeoSeo 目录');
         }
 
-        // 4. 备份旧版
+        // 4. 备份旧版(整目录递归, 用户自行添加的文件一并进备份;
+        //    备份里的 Plugin.php 改名为 .bak, 避免后台插件列表出现重复的 TeoSeo 条目)
         $backupDir = __TYPECHO_ROOT_DIR__ . '/usr/plugins/TeoSeo-backup';
         $this->rrmdir($backupDir);
         if (!@mkdir($backupDir, 0755, true)) {
@@ -247,21 +273,16 @@ class TeoSeo_Update extends \Typecho\Widget implements \Widget\ActionInterface
             @unlink($tmpZip);
             $this->out(false, '无法创建备份目录');
         }
-        $coreFiles = array('Plugin.php', 'Client.php', 'Update.php', 'Widget.php', 'ai.php', 'logs.php');
         $backedUp = 0;
-        foreach ($coreFiles as $f) {
-            if (file_exists($pluginDir . '/' . $f) && @copy($pluginDir . '/' . $f, $backupDir . '/' . $f)) {
-                $backedUp++;
-            }
+        $this->rcopy($pluginDir, $backupDir, $backedUp);
+        if (file_exists($backupDir . '/Plugin.php')) {
+            @rename($backupDir . '/Plugin.php', $backupDir . '/Plugin.php.bak');
         }
 
-        // 5. 覆盖
+        // 5. 覆盖(整目录递归同步: 新版本新增的文件同样落盘, 不再依赖固定白名单;
+        //    只覆盖不删除, 插件目录里用户自有的文件不受影响)
         $overwritten = 0;
-        foreach ($coreFiles as $f) {
-            if (file_exists($srcDir . '/' . $f) && @copy($srcDir . '/' . $f, $pluginDir . '/' . $f)) {
-                $overwritten++;
-            }
-        }
+        $this->rcopy($srcDir, $pluginDir, $overwritten);
 
         // 6. 清理
         $this->rrmdir($tmpDir);

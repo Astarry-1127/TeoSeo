@@ -103,7 +103,7 @@ try {
         $offset = ($page - 1) * $perPage;
     }
 
-    $rows   = $db->fetchAll($db->query("SELECT * FROM `{$prefix}seo_logs` ORDER BY `id` DESC LIMIT {$offset}, {$perPage}"));
+    $rows   = $db->fetchAll($db->query("SELECT * FROM `{$prefix}seo_logs` ORDER BY `id` DESC LIMIT {$perPage} OFFSET {$offset}"));
 
     if (empty($rows)) {
         echo '<p style="color:#999;">暂无推送记录, 发布新文章后这里会显示每次推送给搜索引擎的结果。</p>';

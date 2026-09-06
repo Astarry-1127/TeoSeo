@@ -558,8 +558,10 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
      * 发布后 AI 生成摘要与关键词。
      *
      * 走 register_shutdown_function 挂到请求末尾执行——AI 接口慢的话(几十秒)
-     * 不能让发文章的人干等, 响应先回去, 生成结果写完字段下次刷新就能看到。
-     * 失败静默记日志, 不影响发布本身。
+     * 不能让发文章的人干等。注意: FPM 下 shutdown 回调仍会阻塞响应发送,
+     * 所以回调里先 fastcgi_finish_request() 把响应冲给客户端再开始生成
+     * (非 FPM 环境无此函数, 退化为旧行为)。生成结果写完字段下次刷新就能
+     * 看到; 失败静默记日志, 不影响发布本身。
      *
      * @param array $contents 文章数据
      * @param mixed $widget 发布组件
@@ -575,6 +577,11 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             $cid = intval($row['cid']);
             register_shutdown_function(function () use ($cid) {
                 try {
+                    // 必须在回调开头调用: PHP 先跑完所有 shutdown 函数才发送响应,
+                    // 不先断开的话发布动作会被 AI 请求卡到超时
+                    if (function_exists('fastcgi_finish_request')) {
+                        @fastcgi_finish_request();
+                    }
                     self::applyAiToCid($cid, false);
                 } catch (\Throwable $e) {
                     error_log('[TeoSeo-AI] shutdown 阶段生成失败: ' . $e->getMessage());
@@ -829,19 +836,21 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     }
 
     /**
-     * headerOptions filter: Typecho 核心输出 meta 前替换为干净版 description/keywords
+     * headerOptions filter: Typecho 核心输出 meta 前替换 description/keywords
      *
-     * Typecho 核心对无自定义字段的文章会从 markdown 正文截取 description
-     * (会带 ## 等符号, 详见 Widget_Archive::header() 的 $allows 组装)。
-     * 这里在输出前统一换成 AI 摘要或清理后的正文, 同时保留 AI 关键词。
+     * 行为分层(与 README 的功能划分对齐):
+     * - AI 摘要/关键词存在时: 无论 GEO 开关都替换。「AI 内容优化」承诺前台
+     *   输出 meta description / keywords, 早期版本整个方法被 GEO 开关短路,
+     *   而核心 Archive::header() 先 echo 再触发 header 钩子, AI 摘要只进
+     *   JSON-LD 永远上不了 meta —— 现已修复;
+     * - 无 AI 字段时: GEO 开 → 用清理后的正文替换(无 markdown 污染);
+     *   GEO 关 → 不触碰, 保留核心原生行为(meta 清理属于 GEO 能力范围)。
+     *
      * 钩子方式: Widget_Archive::headerOptions filter(在 echo 前执行)。
      */
     public static function cleanHeaderOptions(array $allows, $archive): array
     {
         try {
-            if (!self::geoEnabled()) {
-                return $allows;
-            }
             if (!($archive instanceof \Widget\Archive) || (!$archive->is('post') && !$archive->is('page'))) {
                 return $allows;
             }
@@ -870,8 +879,11 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             } catch (\Throwable $e) {
             }
 
+            $geo = self::geoEnabled();
+
             $desc = self::cleanMetaText($summary);
-            if ('' === $desc) {
+            if ('' === $desc && $geo) {
+                // 无 AI 摘要且 GEO 开启: 用清理后的正文兜底(GEO 的 meta 清理能力)
                 $desc = self::cleanMetaText((string) $archive->text);
             }
             if ('' !== $desc) {
@@ -1368,24 +1380,58 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     }
 
     /**
-     * 确保推送日志表存在
+     * 确保推送日志表存在(按数据库驱动生成对应方言的 DDL)
      */
     private static function ensureLogTable()
     {
         try {
             $db     = \Typecho\Db::get();
             $prefix = $db->getPrefix();
-            $db->query("CREATE TABLE IF NOT EXISTS `{$prefix}" . self::LOG_TABLE . "` (
-                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                `created` INT UNSIGNED NOT NULL DEFAULT 0,
-                `slug` VARCHAR(255) NOT NULL DEFAULT '',
-                `url` VARCHAR(500) NOT NULL DEFAULT '',
-                `target` VARCHAR(50) NOT NULL DEFAULT '',
-                `status` VARCHAR(20) NOT NULL DEFAULT '',
-                `detail` VARCHAR(500) NOT NULL DEFAULT '',
-                PRIMARY KEY (`id`),
-                KEY `created` (`created`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            $table  = $prefix . self::LOG_TABLE;
+
+            // getDriver() 返回 'mysql'/'sqlite'/'pgsql' 等, 子串匹配兼容适配器类名
+            $driver = '';
+            try {
+                $driver = strtolower((string) $db->getAdapter()->getDriver());
+            } catch (\Throwable $e) {
+                $driver = 'mysql';
+            }
+
+            if (false !== strpos($driver, 'sqlite')) {
+                $db->query("CREATE TABLE IF NOT EXISTS \"{$table}\" (
+                    \"id\" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    \"created\" INTEGER NOT NULL DEFAULT 0,
+                    \"slug\" TEXT NOT NULL DEFAULT '',
+                    \"url\" TEXT NOT NULL DEFAULT '',
+                    \"target\" TEXT NOT NULL DEFAULT '',
+                    \"status\" TEXT NOT NULL DEFAULT '',
+                    \"detail\" TEXT NOT NULL DEFAULT ''
+                )");
+                $db->query("CREATE INDEX IF NOT EXISTS \"{$table}_created\" ON \"{$table}\" (\"created\")");
+            } elseif (false !== strpos($driver, 'pgsql') || false !== strpos($driver, 'postgres')) {
+                $db->query("CREATE TABLE IF NOT EXISTS \"{$table}\" (
+                    \"id\" SERIAL PRIMARY KEY,
+                    \"created\" INTEGER NOT NULL DEFAULT 0,
+                    \"slug\" VARCHAR(255) NOT NULL DEFAULT '',
+                    \"url\" VARCHAR(500) NOT NULL DEFAULT '',
+                    \"target\" VARCHAR(50) NOT NULL DEFAULT '',
+                    \"status\" VARCHAR(20) NOT NULL DEFAULT '',
+                    \"detail\" VARCHAR(500) NOT NULL DEFAULT ''
+                )");
+                $db->query("CREATE INDEX IF NOT EXISTS \"{$table}_created\" ON \"{$table}\" (\"created\")");
+            } else {
+                $db->query("CREATE TABLE IF NOT EXISTS `{$table}` (
+                    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    `created` INT UNSIGNED NOT NULL DEFAULT 0,
+                    `slug` VARCHAR(255) NOT NULL DEFAULT '',
+                    `url` VARCHAR(500) NOT NULL DEFAULT '',
+                    `target` VARCHAR(50) NOT NULL DEFAULT '',
+                    `status` VARCHAR(20) NOT NULL DEFAULT '',
+                    `detail` VARCHAR(500) NOT NULL DEFAULT '',
+                    PRIMARY KEY (`id`),
+                    KEY `created` (`created`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            }
         } catch (Exception $e) {
             error_log('[TeoSeo] ensureLogTable failed: ' . $e->getMessage());
         }
@@ -1403,13 +1449,16 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     private static function logPush(string $slug, string $url, string $target, bool $ok, string $detail)
     {
         try {
-            $db     = \Typecho\Db::get();
-            $prefix = $db->getPrefix();
-            $db->query("INSERT INTO `{$prefix}" . self::LOG_TABLE . "`
-                (`created`, `slug`, `url`, `target`, `status`, `detail`)
-                VALUES ('" . time() . "', '" . addslashes($slug) . "', '" . addslashes($url) . "',
-                        '" . addslashes($target) . "', '" . ($ok ? 'success' : 'fail') . "',
-                        '" . addslashes($detail) . "')");
+            $db = \Typecho\Db::get();
+            // 走查询构建器(各数据库通吃, 参数由适配器转义), 不再手拼 SQL
+            $db->query($db->insert('table.' . self::LOG_TABLE)->rows(array(
+                'created' => time(),
+                'slug'    => $slug,
+                'url'     => $url,
+                'target'  => $target,
+                'status'  => $ok ? 'success' : 'fail',
+                'detail'  => $detail,
+            )));
         } catch (Exception $e) {
             error_log('[TeoSeo] logPush failed: ' . $e->getMessage());
         }

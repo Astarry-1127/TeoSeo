@@ -138,7 +138,7 @@ try {
          LEFT JOIN `{$prefix}fields` k ON k.cid = c.cid AND k.name = 'teoseo_ai_keywords'
          WHERE c.type = 'post' AND c.status = 'publish'
          ORDER BY (f.cid IS NULL) DESC, c.cid DESC
-         LIMIT {$offset}, {$perPage}"
+         LIMIT {$perPage} OFFSET {$offset}"
     ));
 } catch (\Throwable $e) {
     $msg = '文章列表读取失败: ' . $e->getMessage();
