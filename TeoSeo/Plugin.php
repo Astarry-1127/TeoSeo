@@ -514,17 +514,17 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             }
 
             $siteUrl = rtrim($options->siteUrl, '/');
-            if (empty($contents['slug'])) {
+
+            // 留空缩略名发布时表单里 slug 为空(Typecho 落库时才生成, 不会回写表单数组),
+            // 这里统一回查库里真实行, 否则这类文章会被静默跳过
+            $row = self::resolveContentRow($contents, $widget);
+            if (NULL === $row) {
                 return;
             }
 
-            // 生成文章 URL(走路由表, 兼容自定义链接格式)
-            $permalink = Typecho\Router::url('post', array('slug' => $contents['slug']), $siteUrl);
-            if (empty($permalink) || '#' == $permalink) {
-                $permalink = $siteUrl . '/' . $contents['slug'] . '/';
-            }
-
-            $slug = $contents['slug'];
+            // 生成文章 URL(补齐 cid/年月日/分类链等路由参数, 兼容自定义链接格式)
+            $permalink = self::buildPermalink($row, $siteUrl);
+            $slug = (string) $row['slug'];
 
             // IndexNow 推送
             if (!empty($config->indexnowKey)) {
@@ -567,17 +567,12 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     public static function aiOnPublish(array $contents, $widget)
     {
         try {
-            $cid = isset($contents['cid']) ? intval($contents['cid']) : 0;
-            if (0 === $cid && !empty($contents['slug'])) {
-                // 兜底: 某些入口只给 slug, 反查一下 cid
-                $row = self::findContentBySlug($contents['slug']);
-                if ($row) {
-                    $cid = intval($row['cid']);
-                }
-            }
-            if (0 === $cid) {
+            // 表单可能不带 cid 且 slug 留空, 统一回查库里真实行再取 cid
+            $row = self::resolveContentRow($contents, $widget);
+            if (NULL === $row || empty($row['cid'])) {
                 return;
             }
+            $cid = intval($row['cid']);
             register_shutdown_function(function () use ($cid) {
                 try {
                     self::applyAiToCid($cid, false);
@@ -881,10 +876,12 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
             }
             if ('' !== $desc) {
                 $desc = function_exists('mb_substr') ? mb_substr($desc, 0, 150) : substr($desc, 0, 150);
-                $allows['description'] = $desc;
+                // 核心把 $allows 原样拼进 meta 标签(自身值是先 htmlspecialchars 的),
+                // 这里必须同样转义, 否则摘要里的引号会打断属性, 甚至被注入标签
+                $allows['description'] = htmlspecialchars($desc, ENT_QUOTES, 'UTF-8');
             }
             if ('' !== $keywords) {
-                $allows['keywords'] = $keywords;
+                $allows['keywords'] = htmlspecialchars($keywords, ENT_QUOTES, 'UTF-8');
             }
         } catch (\Throwable $e) {
         }
@@ -1055,11 +1052,8 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         try {
             $options = \Utils\Helper::options();
             $siteUrl = rtrim($options->siteUrl, '/');
-            $url = Typecho\Router::url('post', array('slug' => $row['slug']), $siteUrl);
-            if (empty($url) || '#' == $url) {
-                $url = $siteUrl . '/' . $row['slug'] . '/';
-            }
-            self::logPush($row['slug'], $url, 'AI摘要', $ok, $detail);
+            $url = self::buildPermalink($row, $siteUrl);
+            self::logPush((string) $row['slug'], $url, 'AI摘要', $ok, $detail);
         } catch (\Throwable $e) {
             error_log('[TeoSeo-AI] logAi failed: ' . $e->getMessage());
         }
@@ -1076,6 +1070,198 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
         $db = \Typecho\Db::get();
         return $db->fetchRow($db->select()->from('table.contents')
             ->where('slug = ?', $slug)->limit(1));
+    }
+
+    /**
+     * 按 cid 查找内容
+     *
+     * @param int $cid 内容 ID
+     * @return array|null
+     */
+    private static function findContentByCid(int $cid)
+    {
+        $db = \Typecho\Db::get();
+        return $db->fetchRow($db->select()->from('table.contents')
+            ->where('cid = ?', $cid)->limit(1));
+    }
+
+    /**
+     * 归一化发布回调传入的文章数据。
+     *
+     * finishPublish 的 $contents 是表单原始值: 留空缩略名发布时 slug 为空
+     * (Typecho 在落库阶段才生成缩略名, 不会回写表单数组), cid 也不在里面,
+     * 直接用会导致推送/AI 被静默跳过。这里优先取 widget 的 cid(publish 完成
+     * 后 widget 已 push 最新内容行), 再回查库里完整行。
+     *
+     * @param array $contents finishPublish 的 $contents
+     * @param mixed $widget finishPublish 的 widget(Widget\Contents\Post\Edit)
+     * @return array|null 完整 contents 行, 拿不到时返回 NULL
+     */
+    private static function resolveContentRow(array $contents, $widget)
+    {
+        $cid = isset($contents['cid']) ? intval($contents['cid']) : 0;
+
+        if (0 === $cid && is_object($widget)) {
+            try {
+                $wCid = intval($widget->cid);
+                if ($wCid > 0) {
+                    $cid = $wCid;
+                }
+            } catch (\Throwable $e) {
+                // widget 未 push 行数据时忽略
+            }
+        }
+
+        try {
+            if ($cid > 0) {
+                $row = self::findContentByCid($cid);
+            } elseif (isset($contents['slug']) && '' !== trim((string) $contents['slug'])) {
+                $row = self::findContentBySlug(trim((string) $contents['slug']));
+            } else {
+                return NULL;
+            }
+        } catch (\Throwable $e) {
+            return NULL;
+        }
+
+        return is_array($row) ? $row : NULL;
+    }
+
+    /**
+     * 生成内容的完整访问 URL。
+     *
+     * Router::url 对缺失的路由参数会以 {param} 字面量填充(如默认链接
+     * /archives/[cid]/ 下只传 slug 会得到 /archives/{cid}/), 所以这里把
+     * cid/slug/年月日/分类链等参数一次性补齐, 语义与核心
+     * Widget\Base\Contents::getRouterParam() 保持一致。
+     *
+     * @param array $row contents 行(至少含 cid/slug/type/created)
+     * @param string $siteUrl 站点根地址
+     * @param string|null $routeName 路由名(post/page), NULL 时按 type 推断
+     * @return string
+     */
+    public static function buildPermalink(array $row, string $siteUrl, ?string $routeName = NULL): string
+    {
+        $routeName = $routeName ?: ('page' === ($row['type'] ?? '') ? 'page' : 'post');
+        $permalink = Typecho\Router::url($routeName, self::buildRouteParams($row, $routeName), $siteUrl);
+
+        // 路由未注册或参数仍缺失时退化为直接拼接, 宁可次优也不推坏链
+        if ('' === $permalink || '#' === $permalink || false !== strpos($permalink, '{')) {
+            $slug = rawurlencode((string) ($row['slug'] ?? ''));
+            $permalink = $siteUrl . '/'
+                . ('page' === $routeName
+                    ? $slug . '.html'
+                    : ('' === $slug ? '?p=' . intval($row['cid'] ?? 0) : $slug . '/'));
+        }
+
+        return $permalink;
+    }
+
+    /**
+     * 根据 contents 行构造路由反解参数(与核心 getRouterParam 语义一致:
+     * slug/category 按 urlencode, 年月日按站点时区修正且月/日零填充)。
+     *
+     * @param array $row contents 行
+     * @param string $routeName 路由名(决定是否需要查询分类链)
+     * @return array
+     */
+    private static function buildRouteParams(array $row, string $routeName): array
+    {
+        $cid = isset($row['cid']) ? intval($row['cid']) : 0;
+        $slug = isset($row['slug']) ? (string) $row['slug'] : '';
+        $created = isset($row['created']) ? intval($row['created']) : 0;
+
+        // 核心经 Typecho\Date 输出年月日: 时间戳按站点时区偏移修正, 月/日零填充
+        $ts = $created + (\Typecho\Date::$timezoneOffset - \Typecho\Date::$serverTimezoneOffset);
+
+        $category = '';
+        $directory = array();
+
+        // 仅当路由真的用到 {category}/{directory} 时才查询分类链, 避免 sitemap 逐篇多查
+        $needsCategory = false;
+        $route = Typecho\Router::get($routeName);
+        if (is_array($route) && isset($route['params']) && is_array($route['params'])) {
+            $needsCategory = in_array('category', $route['params'], true)
+                || in_array('directory', $route['params'], true);
+        }
+
+        if ($needsCategory && $cid > 0) {
+            try {
+                $cats = self::getCategoryChain($cid);
+                if (!empty($cats)) {
+                    $first = $cats[0];
+                    $category = (string) $first['slug'];
+                    // 父级链(根 → 直接父级 → 自身), 与核心 ___directory 一致
+                    $byMid = array();
+                    foreach ($cats as $c) {
+                        $byMid[intval($c['mid'])] = $c;
+                    }
+                    $chain = array();
+                    $parent = intval($first['parent']);
+                    $guard = 0;
+                    while ($parent > 0 && $guard++ < 20) {
+                        $p = isset($byMid[$parent]) ? $byMid[$parent] : self::findMetaByMid($parent);
+                        if (!is_array($p)) {
+                            break;
+                        }
+                        array_unshift($chain, (string) $p['slug']);
+                        $parent = intval($p['parent']);
+                    }
+                    $chain[] = $category;
+                    $directory = $chain;
+                }
+            } catch (\Throwable $e) {
+                // 分类信息缺失时退化为空, 只影响 {category}/{directory} 型链接
+            }
+        }
+
+        return array(
+            'cid'       => $cid,
+            'slug'      => urlencode($slug),
+            'category'  => '' === $category ? '' : urlencode($category),
+            'directory' => implode('/', array_map('urlencode', $directory)),
+            'year'      => date('Y', $ts),
+            'month'     => date('m', $ts),
+            'day'       => date('d', $ts),
+        );
+    }
+
+    /**
+     * 取文章所属分类(按后台排序字段升序, 取第一条作为"第一分类"),
+     * 供 category/directory 路由参数使用。
+     *
+     * @param int $cid 内容 ID
+     * @return array
+     */
+    private static function getCategoryChain(int $cid): array
+    {
+        $db = \Typecho\Db::get();
+        $cats = $db->fetchAll($db->select('table.metas.mid', 'table.metas.slug',
+                'table.metas.parent', 'table.metas.order')
+            ->from('table.metas')
+            ->join('table.relationships', 'table.relationships.mid = table.metas.mid')
+            ->where('table.relationships.cid = ?', $cid)
+            ->where('table.metas.type = ?', 'category'));
+        if (empty($cats)) {
+            return array();
+        }
+        usort($cats, function ($a, $b) {
+            return intval($a['order']) <=> intval($b['order']);
+        });
+        return $cats;
+    }
+
+    /**
+     * 按 mid 查找分类(补齐父级链用)
+     *
+     * @param int $mid 分类 ID
+     * @return array|null
+     */
+    private static function findMetaByMid(int $mid)
+    {
+        $db = \Typecho\Db::get();
+        return $db->fetchRow($db->select('mid', 'slug', 'parent')->from('table.metas')
+            ->where('mid = ?', $mid)->limit(1));
     }
 
     /**
@@ -1276,25 +1462,49 @@ class TeoSeo_Plugin implements Typecho_Plugin_Interface
     }
 }
 
-// ===== 自动更新后「待重建钩子」标记检测(2026-08-10) =====
+// ===== 自动更新后「待重建钩子」标记检测 =====
 // 自动更新只覆盖文件, 更新请求内用的是已加载的旧类, activate() 不会注册新版钩子。
 // Update.php 更新后会写 options 的 teoseo_pending_reactivate 标记;
 // 下一次任何请求加载本文件时(activated 含 TeoSeo 则前台/后台都会加载),
-// 检测到标记就按「正确升级法」重建钩子(重置内存+清库+重新activate+写回export), 并清除标记。
+// 检测到标记就就地重建 TeoSeo 钩子并清除标记。
+// 注意: 必须保留库里其他插件的 handles/activated —— 早期版本在这里用空数组
+// init 清库重建, 会把其他插件的钩子一并抹掉(等效于全部停用), 属于破坏性 bug。
 if (defined('__TYPECHO_ROOT_DIR__') && 'cli' !== PHP_SAPI) {
     try {
         $db = \Typecho\Db::get();
         $pending = $db->fetchRow($db->select('value')->from('table.options')
             ->where('name = ?', 'teoseo_pending_reactivate'));
         if ($pending && '1' === (string) $pending['value']) {
-            \Typecho\Plugin::init(array('handles' => array(), 'activated' => array()));
-            $db->query($db->update('table.options')
-                ->rows(array('value' => json_encode(array('handles' => array(), 'activated' => array()))))
+            $row = $db->fetchRow($db->select('value')->from('table.options')
                 ->where('name = ?', 'plugins'));
+            $existing = is_array($row) ? json_decode((string) $row['value'], true) : NULL;
+            if (!is_array($existing)) {
+                $existing = array('handles' => array(), 'activated' => array());
+            }
+            if (!isset($existing['handles']) || !is_array($existing['handles'])) {
+                $existing['handles'] = array();
+            }
+            if (!isset($existing['activated']) || !is_array($existing['activated'])) {
+                $existing['activated'] = array();
+            }
+            // 只摘除 TeoSeo 的旧钩子, 其他插件的 handles 原样保留
+            foreach ($existing['handles'] as $k => $v) {
+                if (is_array($v)) {
+                    foreach ($v as $cb) {
+                        if (is_array($cb) && isset($cb[0]) && 'TeoSeo_Plugin' === $cb[0]) {
+                            unset($existing['handles'][$k]);
+                            break;
+                        }
+                    }
+                }
+            }
+            // 以「其他插件 + 干净的 TeoSeo」重建内存注册表, 再跑新版 activate() 注册当前钩子
+            \Typecho\Plugin::init($existing);
             \TeoSeo_Plugin::activate();
             \Typecho\Plugin::activate('TeoSeo');
+            // 回写完整状态(其他插件 + 新版 TeoSeo), 清除标记
             $db->query($db->update('table.options')
-                ->rows(array('value' => json_encode(\Typecho\Plugin::export())))
+                ->rows(array('value' => json_encode(\Typecho\Plugin::export(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)))
                 ->where('name = ?', 'plugins'));
             $db->query($db->delete('table.options')->where('name = ?', 'teoseo_pending_reactivate'));
         }

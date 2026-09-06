@@ -47,9 +47,9 @@ class TeoSeo_Widget extends Widget implements ActionInterface
         $includeHome   = !(is_array($config->sitemapHome) && !in_array('home', $config->sitemapHome));
         $includePages  = is_array($config->sitemapPages) && in_array('pages', $config->sitemapPages);
 
-        // 查询已发布的文章
+        // 查询已发布的文章(cid/created 一并取出, 供路由反解补齐参数)
         $db   = \Typecho\Db::get();
-        $rows = $db->fetchAll($db->select('slug', 'modified')
+        $rows = $db->fetchAll($db->select('cid', 'slug', 'created', 'modified')
             ->from('table.contents')
             ->where('type = ?', 'post')
             ->where('status = ?', 'publish')
@@ -58,7 +58,7 @@ class TeoSeo_Widget extends Widget implements ActionInterface
         // 查询已发布的独立页面
         $pages = array();
         if ($includePages) {
-            $pages = $db->fetchAll($db->select('slug', 'modified')
+            $pages = $db->fetchAll($db->select('cid', 'slug', 'created', 'modified')
                 ->from('table.contents')
                 ->where('type = ?', 'page')
                 ->where('status = ?', 'publish')
@@ -77,19 +77,13 @@ class TeoSeo_Widget extends Widget implements ActionInterface
 
         // 文章
         foreach ($rows as $row) {
-            $url = Typecho\Router::url('post', array('slug' => $row['slug']), $siteUrl);
-            if (empty($url) || '#' == $url) {
-                $url = $siteUrl . '/' . $row['slug'] . '/';
-            }
+            $url = TeoSeo_Plugin::buildPermalink($row, $siteUrl, 'post');
             $this->urlEntry($url, date('c', $row['modified']), 'weekly', '0.8');
         }
 
         // 独立页面
         foreach ($pages as $row) {
-            $url = Typecho\Router::url('page', array('slug' => $row['slug']), $siteUrl);
-            if (empty($url) || '#' == $url) {
-                $url = $siteUrl . '/' . $row['slug'] . '.html';
-            }
+            $url = TeoSeo_Plugin::buildPermalink($row, $siteUrl, 'page');
             $this->urlEntry($url, date('c', $row['modified']), 'monthly', '0.6');
         }
 

@@ -51,17 +51,35 @@ if (isset($_GET['ajax']) && '1' === (string) $_GET['ajax']) {
 
         // 批量: 每请求处理一篇, JS 循环调用直到 done
         if (isset($_GET['batch']) && '1' === (string) $_GET['batch']) {
+            // 前端回传本次批跑中已失败的 cid, 服务端跳过, 避免同一篇永久失败被无限重试
+            $skipSql = '';
+            if (isset($_GET['skip'])) {
+                $skipIds = array();
+                foreach (explode(',', (string) $_GET['skip']) as $s) {
+                    $s = intval(trim($s));
+                    if ($s > 0) {
+                        $skipIds[] = $s;
+                    }
+                }
+                $skipIds = array_values(array_unique($skipIds));
+                if (count($skipIds) > 200) {
+                    $skipIds = array_slice($skipIds, 0, 200);
+                }
+                if (!empty($skipIds)) {
+                    $skipSql = ' AND c.cid NOT IN (' . implode(',', $skipIds) . ')';
+                }
+            }
             $row = $db->fetchRow($db->query(
                 "SELECT c.cid FROM `{$prefix}contents` c
                  LEFT JOIN `{$prefix}fields` f ON f.cid = c.cid AND f.name = 'teoseo_ai_summary'
-                 WHERE c.type = 'post' AND c.status = 'publish' AND f.cid IS NULL
+                 WHERE c.type = 'post' AND c.status = 'publish' AND f.cid IS NULL{$skipSql}
                  ORDER BY c.cid ASC LIMIT 1"
             ));
             if (!$row) {
                 $jsonOut(array('ok' => true, 'done' => true, 'msg' => '批量生成完成'));
             }
             $r = TeoSeo_Plugin::applyAiToCid(intval($row['cid']), false);
-            $jsonOut(array('ok' => $r[0], 'done' => false, 'msg' => $r[1]));
+            $jsonOut(array('ok' => $r[0], 'done' => false, 'msg' => $r[1], 'cid' => intval($row['cid'])));
         }
 
         // 单篇
@@ -274,16 +292,38 @@ function teoseoBatch() {
     btn.disabled = true;
     btn.textContent = '批量生成中…';
     teoseoShowMsg('开始批量生成, 每篇一次接口调用, 请保持页面打开…', true);
+    var failed = [];          // 本次批跑中失败的 cid, 回传服务端跳过, 避免同一篇被无限重试
+    var consecutiveFails = 0; // 连续失败计数: 连续多篇失败多半是接口配置/网络问题, 停止批跑
     var step = function () {
-        fetch(TEOSEO_BASE + '&ajax=1&batch=1&_=' + encodeURIComponent(TEOSEO_TOKEN))
+        var qs = TEOSEO_BASE + '&ajax=1&batch=1&_=' + encodeURIComponent(TEOSEO_TOKEN);
+        if (failed.length > 0) {
+            qs += '&skip=' + encodeURIComponent(failed.join(','));
+        }
+        fetch(qs)
             .then(function (r) { return r.json(); })
             .then(function (j) {
                 if (j.done) {
-                    teoseoShowMsg(j.msg, true);
-                    location.reload();
+                    teoseoShowMsg(failed.length > 0
+                        ? j.msg + ' (' + failed.length + ' 篇生成失败已跳过, 修复问题后可重新批量生成)'
+                        : j.msg, true);
+                    setTimeout(function () { location.reload(); }, 1500);
                     return;
                 }
                 teoseoShowMsg(j.msg, j.ok);
+                if (j.ok) {
+                    consecutiveFails = 0;
+                } else {
+                    if (j.cid) {
+                        failed.push(parseInt(j.cid, 10));
+                    }
+                    consecutiveFails++;
+                    if (consecutiveFails >= 5) {
+                        btn.disabled = false;
+                        btn.textContent = '批量生成';
+                        teoseoShowMsg('连续 5 篇生成失败, 已停止批跑(多为接口配置或网络问题, 修复后可重新批量生成)', false);
+                        return;
+                    }
+                }
                 step(); // 继续下一篇
             })
             .catch(function (e) {
